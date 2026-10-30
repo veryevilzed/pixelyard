@@ -14,6 +14,10 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import {
+  createDeveloperIdCert, importP12, installKey, keyIdFromPath, KEYS_PAGE, listDeveloperIdCerts, loadTeams, localIdentities,
+  saveTeams, usableIdentities, verifyTeam,
+} from './apple.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TAURI = path.join(ROOT, 'src-tauri');
@@ -185,19 +189,171 @@ function setVersion(v) {
   fs.writeFileSync(cargoPath, cargo);
 }
 
-/** Сертификаты подписи кода из связки ключей. */
-function listIdentities() {
-  const out = sh('security', ['find-identity', '-v', '-p', 'codesigning']).stdout ?? '';
-  const ids = [];
-  for (const line of out.split('\n')) {
-    const m = line.match(/^\s*\d+\)\s+([0-9A-F]{40})\s+"(.+)"$/);
-    if (m) ids.push({ hash: m[1], name: m[2], team: (m[2].match(/\(([A-Z0-9]{10})\)\s*$/) ?? [])[1] ?? '' });
-  }
-  return ids;
-}
 
 function profileWorks(name) {
   return sh('xcrun', ['notarytool', 'history', '--keychain-profile', name, '--output-format', 'json']).status === 0;
+}
+
+// ---------- организации Apple ----------
+
+/** Самый свежий AuthKey_*.p8 в «Загрузках» — подставляется по умолчанию. */
+function downloadedKey() {
+  const dir = path.join(os.homedir(), 'Downloads');
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => /^AuthKey_[A-Z0-9]+\.p8$/i.test(f))
+      .map((f) => ({ f: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)[0]?.f ?? '';
+  } catch {
+    return '';
+  }
+}
+
+const exists = (v) => (fs.existsSync(v.replace(/^~/, os.homedir())) ? null : 'Файл не найден');
+
+/** Добавление организации: ключ App Store Connect API, проверка запросом к Apple. */
+async function addTeam(teams) {
+  info(bold('Ключ App Store Connect API — один раз на организацию:'));
+  info(`1. Откройте ${cyan(KEYS_PAGE)}`);
+  info('   (если у вас несколько организаций — выберите нужную в переключателе вверху справа)');
+  info('2. «Team Keys» → «+» → любое имя, роль Admin → Generate');
+  info('3. Скачайте AuthKey_XXXXXXXXXX.p8 (Apple даёт скачать его только один раз)');
+  info('4. Скопируйте Issuer ID — он над таблицей ключей');
+  info(dim('   Выпуск сертификатов Developer ID Apple обычно разрешает только владельцу аккаунта (Account Holder).'));
+  if (!DRY && (await confirm('Открыть страницу в браузере?', true))) sh('open', [KEYS_PAGE]);
+  const p8 = await ask('Путь к AuthKey_XXXX.p8', downloadedKey(), { validate: exists });
+  const keyId = await ask('Key ID', keyIdFromPath(p8), { validate: (v) => (/^[A-Z0-9]{10}$/.test(v) ? null : '10 символов, например 2X9R4HXF34') });
+  const issuerId = await ask('Issuer ID', '', {
+    validate: (v) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? null : 'UUID вида 57246542-96fe-1a63-e053-0824d011072a'),
+  });
+  const name = await ask('Как назвать организацию в списке', `Организация ${teams.length + 1}`);
+  const team = { name, issuerId, keyId, keyPath: DRY ? p8 : installKey(p8, keyId) };
+  if (!DRY) {
+    info('Проверяю ключ…');
+    try {
+      await verifyTeam(team);
+    } catch (e) {
+      fail(`Apple не приняла ключ: ${e.message}\n  Проверьте Issuer ID и Key ID, и что ключ не отозван.`);
+    }
+    saveTeams([...loadTeams().filter((t) => t.keyId !== keyId), team]);
+    ok(`Ключ работает, организация «${name}» сохранена (${team.keyPath.replace(os.homedir(), '~')})`);
+  }
+  return team;
+}
+
+function updateTeam(team) {
+  saveTeams(loadTeams().map((t) => (t.keyId === team.keyId ? team : t)));
+}
+
+/** Сертификат Developer ID организации на этом Mac: найти или выпустить через API. */
+async function teamIdentity(team) {
+  if (DRY) {
+    info('--dry-run: сертификат не проверяется');
+    return { name: `Developer ID Application: ${team.name} (${team.teamId ?? 'TEAMID'})`, team: team.teamId ?? '' };
+  }
+  info('Ищу сертификаты Developer ID организации…');
+  let usable;
+  try {
+    usable = await usableIdentities(team);
+  } catch (e) {
+    fail(`Apple: ${e.message}`);
+  }
+  let identity = null;
+  if (usable.length === 1) identity = usable[0];
+  else if (usable.length > 1) {
+    identity = await choose('Найдено несколько сертификатов — какой использовать?', usable.map((u) => ({ label: u.name, value: u, hint: `действует до ${String(u.expires).slice(0, 10)}` })), 0);
+  } else {
+    const remote = await listDeveloperIdCerts(team);
+    if (remote.length) warn(`У организации есть сертификаты Developer ID (${remote.length}), но закрытых ключей к ним на этом Mac нет`);
+    else warn('У организации ещё нет сертификата Developer ID Application');
+    const how = await choose('Что сделать?', [
+      { label: 'Выпустить новый сертификат автоматически', value: 'create', hint: 'ключ создастся в связке ключей этого Mac' },
+      { label: 'Импортировать .p12', value: 'p12', hint: 'если сертификат уже есть на другом Mac' },
+      { label: 'Отмена', value: 'cancel' },
+    ]);
+    if (how === 'cancel') fail('Отменено');
+    if (how === 'p12') {
+      const p12 = await ask('Путь к .p12', '', { validate: exists });
+      try {
+        importP12(p12, await askSecret('Пароль от .p12 (ввод скрыт)'));
+      } catch (e) {
+        fail(`Не удалось импортировать: ${e.message}`);
+      }
+      const after = await usableIdentities(team);
+      if (!after.length) fail('Этот .p12 не относится к выбранной организации');
+      identity = after[0];
+    } else {
+      const email = await ask('Email в сертификате', sh('git', ['config', 'user.email']).stdout?.trim() ?? '');
+      try {
+        identity = await createDeveloperIdCert(team, { email, commonName: `${team.name} Developer ID` }, ok);
+      } catch (e) {
+        fail(e.message);
+      }
+      warn('Закрытый ключ сертификата есть только в связке ключей этого Mac.');
+      info('Для сборки на другом Mac: «Связка ключей» → «Мои сертификаты» → сертификат → «Экспортировать» (.p12).');
+      info('macOS при первой подписи спросит доступ к ключу — нажмите «Всегда разрешать».');
+    }
+  }
+  if (identity.team && team.teamId !== identity.team) {
+    team.teamId = identity.team;
+    updateTeam(team);
+  }
+  ok(identity.name);
+  return identity;
+}
+
+/** Ручной режим: сертификат из связки ключей или импорт .p12. */
+async function manualIdentity() {
+  let ids = localIdentities();
+  if (!ids.length && !DRY && (await confirm('В связке ключей нет сертификатов подписи. Импортировать .p12?', true))) {
+    const p12 = await ask('Путь к .p12', '', { validate: exists });
+    try {
+      importP12(p12, await askSecret('Пароль от .p12 (ввод скрыт)'));
+    } catch (e) {
+      fail(`Не удалось импортировать: ${e.message}`);
+    }
+    ids = localIdentities();
+  }
+  const options = [
+    ...ids.map((i) => ({ label: i.name, value: i, hint: i.name.startsWith('Developer ID Application') ? 'для распространения' : 'не подходит для нотаризации' })),
+    { label: 'Без подписи', value: null },
+  ];
+  const idx = options.findIndex((o) => o.value && o.value.name === saved.identity);
+  const identity = YES && idx >= 0 ? options[idx].value : await choose('Чем подписать?', options, Math.max(0, idx));
+  if (identity) ok(identity.name);
+  return identity;
+}
+
+/** Ручная нотаризация: профиль notarytool или Apple ID с паролем приложения. */
+async function manualNotary(identity) {
+  if (!identity.name.startsWith('Developer ID Application')) {
+    info('Нотаризация доступна только с сертификатом Developer ID Application');
+    return { method: 'none' };
+  }
+  const methods = [
+    { label: 'Профиль в связке ключей (notarytool)', value: 'profile', hint: 'пароль хранит macOS' },
+    { label: 'Apple ID + пароль приложения', value: 'appleid', hint: 'appleid.apple.com → Пароли приложений' },
+    { label: 'Не нотаризовать', value: 'none' },
+  ];
+  const savedM = methods.findIndex((m) => m.value === saved.notaryMethod);
+  const method = YES && savedM >= 0 ? methods[savedM].value : await choose('Как нотаризовать?', methods, Math.max(0, savedM));
+  if (method === 'profile') {
+    const profile = YES && saved.notaryProfile ? saved.notaryProfile : await ask('Имя профиля', saved.notaryProfile ?? 'pixelyard-notary');
+    if (!DRY && !profileWorks(profile)) {
+      warn(`Профиль «${profile}» не найден — создадим (notarytool спросит пароль приложения)`);
+      const appleId = await ask('Apple ID (email)', saved.appleId ?? '');
+      await run('xcrun', ['notarytool', 'store-credentials', profile, '--apple-id', appleId, '--team-id', identity.team]);
+      saved.appleId = appleId;
+    }
+    saved.notaryProfile = profile;
+    return { method, profile };
+  }
+  if (method === 'appleid') {
+    const appleId = YES && saved.appleId ? saved.appleId : await ask('Apple ID (email)', saved.appleId ?? '');
+    saved.appleId = appleId;
+    return { method, appleId, password: await askSecret('Пароль приложения (не пароль Apple ID; ввод скрыт)'), team: identity.team };
+  }
+  return { method: 'none' };
 }
 
 // ---------- шаги ----------
@@ -279,84 +435,33 @@ async function main() {
   }
   ok(target);
 
-  // 5. подпись
-  step(5, 'Подпись');
-  let ids = listIdentities();
-  if (!ids.length) {
-    warn('В связке ключей нет сертификатов подписи кода');
-    info(`Для распространения вне App Store нужен ${bold('Developer ID Application')}.`);
-    info('Получить: developer.apple.com → Certificates → «+» → Developer ID Application,');
-    info('или Xcode → Settings → Accounts → Manage Certificates.');
-    if (!DRY && (await confirm('Импортировать сертификат из .p12 сейчас?', true))) {
-      const p12 = await ask('Путь к .p12', '', { validate: (v) => (fs.existsSync(v.replace(/^~/, os.homedir())) ? null : 'Файл не найден') });
-      const pass = await askSecret('Пароль от .p12 (ввод скрыт)');
-      const keychain = path.join(os.homedir(), 'Library/Keychains/login.keychain-db');
-      const r = sh('security', ['import', p12.replace(/^~/, os.homedir()), '-k', keychain, '-P', pass, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security']);
-      if (r.status !== 0) fail(`Не удалось импортировать: ${r.stderr.trim()}`);
-      ok('Сертификат импортирован');
-      ids = listIdentities();
-    }
-  }
-  const devIds = ids.filter((i) => i.name.startsWith('Developer ID Application'));
-  const others = ids.filter((i) => !i.name.startsWith('Developer ID Application'));
-  const identOptions = [
-    ...devIds.map((i) => ({ label: i.name, value: i, hint: 'для распространения, можно нотаризовать' })),
-    ...others.map((i) => ({ label: i.name, value: i, hint: 'не подходит для нотаризации' })),
-    { label: 'Без подписи', value: null, hint: 'только для проверки, Gatekeeper будет ругаться' },
-  ];
-  const savedIdx = identOptions.findIndex((o) => o.value && o.value.name === saved.identity);
+  // 5. аккаунт Apple: сертификат и нотаризация
+  step(5, 'Аккаунт Apple');
   let identity = null;
-  if (YES && savedIdx >= 0) identity = identOptions[savedIdx].value;
-  else if (YES && saved.identity === null) identity = null;
-  else identity = await choose('Чем подписать?', identOptions, savedIdx >= 0 ? savedIdx : 0);
-  if (identity) ok(`${identity.name}${identity.team ? dim(`  (Team ID ${identity.team})`) : ''}`);
-  else warn('Сборка без подписи');
-
-  // 6. нотаризация
-  step(6, 'Нотаризация');
   let notary = { method: 'none' };
-  const canNotarize = identity && identity.name.startsWith('Developer ID Application');
-  if (!canNotarize) {
-    info(identity ? 'Нотаризация доступна только с сертификатом Developer ID Application' : 'Без подписи нотаризация невозможна');
+  const teams = loadTeams();
+  const accOptions = [
+    ...teams.map((t) => ({ label: t.name, value: { kind: 'team', team: t }, hint: `${t.teamId ? `Team ID ${t.teamId} · ` : ''}ключ ${t.keyId}` })),
+    { label: 'Добавить организацию', value: { kind: 'add' }, hint: 'ключ App Store Connect API — сертификат и нотаризация автоматически' },
+    { label: 'Вручную', value: { kind: 'manual' }, hint: 'сертификат из связки ключей или .p12, нотаризация паролем' },
+    { label: 'Без подписи', value: { kind: 'none' }, hint: 'только для проверки, Gatekeeper будет ругаться' },
+  ];
+  const savedAcc = accOptions.findIndex((o) => (o.value.kind === 'team' ? o.value.team.keyId === saved.teamKeyId : o.value.kind === saved.account));
+  let acc = YES && savedAcc >= 0 ? accOptions[savedAcc].value : await choose('От какой организации подписывать?', accOptions, savedAcc >= 0 ? savedAcc : 0);
+  if (acc.kind === 'add') acc = { kind: 'team', team: await addTeam(teams) };
+  if (acc.kind === 'team') {
+    identity = await teamIdentity(acc.team);
+    notary = { method: 'apikey', keyPath: acc.team.keyPath, keyId: acc.team.keyId, issuer: acc.team.issuerId };
+    saved.account = 'team';
+    saved.teamKeyId = acc.team.keyId;
+    ok('Нотаризация — тем же ключом API');
+  } else if (acc.kind === 'manual') {
+    identity = await manualIdentity();
+    notary = identity ? await manualNotary(identity) : notary;
+    saved.account = 'manual';
   } else {
-    const methods = [
-      { label: 'Профиль в связке ключей (notarytool)', value: 'profile', hint: 'рекомендуется: пароль хранит macOS' },
-      { label: 'Apple ID + пароль приложения', value: 'appleid', hint: 'appleid.apple.com → Пароли приложений' },
-      { label: 'Ключ App Store Connect API (.p8)', value: 'apikey', hint: 'удобно для CI' },
-      { label: 'Не нотаризовать', value: 'none', hint: 'другие Mac покажут предупреждение' },
-    ];
-    const savedM = methods.findIndex((m) => m.value === saved.notaryMethod);
-    const method = YES && savedM >= 0 ? methods[savedM].value : await choose('Как нотаризовать?', methods, savedM >= 0 ? savedM : 0);
-    if (method === 'profile') {
-      const profile = YES && saved.notaryProfile ? saved.notaryProfile : await ask('Имя профиля', saved.notaryProfile ?? 'pixelyard-notary');
-      if (!DRY && !profileWorks(profile)) {
-        warn(`Профиль «${profile}» не найден или не работает — создадим`);
-        info('notarytool спросит пароль приложения сам; он сохранится в связке ключей.');
-        const appleId = await ask('Apple ID (email)', saved.appleId ?? '');
-        await run('xcrun', ['notarytool', 'store-credentials', profile, '--apple-id', appleId, '--team-id', identity.team]);
-        saved.appleId = appleId;
-      }
-      notary = { method, profile };
-    } else if (method === 'appleid') {
-      const appleId = YES && saved.appleId ? saved.appleId : await ask('Apple ID (email)', saved.appleId ?? '');
-      const password = await askSecret('Пароль приложения (не пароль Apple ID; ввод скрыт)');
-      notary = { method, appleId, password, team: identity.team };
-      if (!DRY && (await confirm('Сохранить как профиль связки ключей, чтобы больше не вводить?', true))) {
-        const profile = await ask('Имя профиля', 'pixelyard-notary');
-        await run('xcrun', ['notarytool', 'store-credentials', profile, '--apple-id', appleId, '--team-id', identity.team, '--password', password], { secretArgs: [password] });
-        notary = { method: 'profile', profile };
-        saved.notaryProfile = profile;
-      }
-      saved.appleId = appleId;
-    } else if (method === 'apikey') {
-      const keyPath = await ask('Путь к AuthKey_XXXX.p8', saved.apiKeyPath ?? '', { validate: (v) => (fs.existsSync(v.replace(/^~/, os.homedir())) ? null : 'Файл не найден') });
-      const keyId = await ask('Key ID', saved.apiKeyId ?? path.basename(keyPath).match(/AuthKey_(\w+)\.p8/)?.[1] ?? '');
-      const issuer = await ask('Issuer ID (UUID из App Store Connect → Keys)', saved.apiIssuer ?? '');
-      notary = { method, keyPath: keyPath.replace(/^~/, os.homedir()), keyId, issuer };
-      Object.assign(saved, { apiKeyPath: keyPath, apiKeyId: keyId, apiIssuer: issuer });
-    }
-    if (notary.method !== 'none') ok(`Нотаризация: ${notary.method === 'profile' ? `профиль «${notary.profile}»` : notary.method === 'apikey' ? 'API-ключ' : 'Apple ID'}`);
-    else warn('Без нотаризации');
+    saved.account = 'none';
+    warn('Сборка без подписи');
   }
 
   // 7. git
@@ -366,11 +471,11 @@ async function main() {
   }
 
   // сводка
-  step(7, 'Сводка');
+  step(6, 'Сводка');
   info(`Приложение:   ${bold(productName)} ${version}  (${identifier})`);
   info(`Архитектура:  ${target}`);
   info(`Подпись:      ${identity ? identity.name : red('нет')}`);
-  info(`Нотаризация:  ${notary.method === 'none' ? yellow('нет') : notary.method}`);
+  info(`Нотаризация:  ${notary.method === 'none' ? yellow('нет') : { apikey: 'ключ API организации', profile: `профиль «${notary.profile}»`, appleid: 'Apple ID' }[notary.method]}`);
   info(`Результат:    release/${version}/`);
   if (!YES && !(await confirm('Собираем?', true))) {
     rl.close();
@@ -381,14 +486,14 @@ async function main() {
   Object.assign(saved, {
     productName, identifier, copyright, minimumSystemVersion, target,
     identity: identity ? identity.name : null,
-    notaryMethod: notary.method,
+    notaryMethod: notary.method === 'apikey' && saved.account === 'team' ? saved.notaryMethod : notary.method,
     notaryProfile: notary.profile ?? saved.notaryProfile,
   });
   if (!DRY) fs.writeFileSync(SETTINGS, JSON.stringify(saved, null, 2) + '\n');
   if (version !== current && !DRY) setVersion(version);
 
   // 8. сборка
-  step(8, 'Сборка');
+  step(7, 'Сборка');
   const override = {
     productName,
     identifier,
@@ -408,7 +513,7 @@ async function main() {
 
   // 9. проверка подписи
   if (identity) {
-    step(9, 'Проверка подписи');
+    step(8, 'Проверка подписи');
     await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
     if (!DRY) {
       const d = sh('codesign', ['-dv', '--verbose=4', appPath]).stderr;
@@ -453,7 +558,7 @@ async function main() {
   const arch = { 'aarch64-apple-darwin': 'arm64', 'x86_64-apple-darwin': 'x64', 'universal-apple-darwin': 'universal' }[target];
   const base = `${productName}_${version}_${arch}`;
   if (notary.method !== 'none') {
-    step(10, 'Нотаризация приложения');
+    step(9, 'Нотаризация приложения');
     const zipForNotary = path.join(os.tmpdir(), `${base}-notary.zip`);
     await run('ditto', ['-c', '-k', '--keepParent', appPath, zipForNotary]);
     await notarize(zipForNotary, 'приложение');
@@ -463,7 +568,7 @@ async function main() {
   }
 
   // 11. образ диска и архив
-  step(11, 'Образ диска и архив');
+  step(10, 'Образ диска и архив');
   const zipPath = path.join(outDir, `${base}.zip`);
   await run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
   const stage = path.join(os.tmpdir(), `pixelyard-dmg-${process.pid}`);
@@ -485,7 +590,7 @@ async function main() {
 
   // 12. Gatekeeper
   if (identity && !DRY) {
-    step(12, 'Проверка Gatekeeper');
+    step(11, 'Проверка Gatekeeper');
     const a = sh('spctl', ['-a', '-vvv', '-t', 'exec', appPath]);
     const dmg = sh('spctl', ['-a', '-vvv', '-t', 'open', '--context', 'context:primary-signature', dmgPath]);
     (a.status === 0 ? ok : warn)(`Приложение: ${(a.stderr || a.stdout).trim().split('\n').slice(0, 2).join(' · ')}`);
@@ -503,7 +608,7 @@ async function main() {
 
   // 13. git
   if (gitTag) {
-    step(13, 'Git');
+    step(12, 'Git');
     await run('git', ['add', 'package.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock']);
     await run('git', ['commit', '-m', `Версия ${version}`]);
     await run('git', ['tag', '-a', `v${version}`, '-m', `${productName} ${version}`]);
