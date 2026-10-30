@@ -1684,3 +1684,49 @@ code {
   color: var(--text);
   font: bold 12px Georgia, serif;
 }
+/* колонка панелей не прокручивается вбок; кнопки заголовка, если не влезают, уходят на вторую строку */
+.dock > .sidebar {
+  overflow-x: hidden;
+}
+.dock .panel-head {
+  height: auto;
+  min-height: 26px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.dock .panel-head .actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.dock .panel-head .grip {
+  display: none;
+}
+/* место, куда встанет перетаскиваемая панель: яркая линия между панелями */
+.dock > .sidebar > .panel,
+.dock-tail {
+  position: relative;
+}
+.dock .panel.drop-before,
+.dock .dock-tail.drop-before {
+  box-shadow: none;
+}
+.dock .panel.drop-before::before,
+.dock .dock-tail.drop-before::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35), 0 0 10px rgba(59, 130, 246, 0.8);
+  z-index: 20;
+  pointer-events: none;
+}
+.dock .dock-tail.drop-before::before {
+  top: 2px;
+}
