@@ -7,7 +7,7 @@ import { newAtlasDoc } from './atlasDoc';
 import { largestIconPng } from './icons';
 import { isTauri, type FileFilter, type LoadedFile } from './platform';
 import { grayToMask, maskToGray } from './composite';
-import { DEFAULT_EFFECTS, hasEffects, LABEL_COLORS, type BlendMode, type LabelColor, type Layer, type LayerEffects, type LayerGroup, type RGBA } from './types';
+import { DEFAULT_EFFECTS, hasEffects, LABEL_COLORS, type BlendMode, type LabelColor, type Layer, type LayerEffects, type LayerGroup, type RGBA, type TextData } from './types';
 
 export const OPEN_FILTERS: FileFilter[] = [
   {
@@ -146,6 +146,7 @@ function decodePsd(file: LoadedFile): Doc {
         blend: (l.blendMode && PSD_TO_BLEND[l.blendMode]) || 'normal',
         color: color(l.layerColor),
         group,
+        text: textFromPsd(l),
       });
     }
   };
@@ -160,6 +161,30 @@ function decodePsd(file: LoadedFile): Doc {
   doc.layers = layers;
   doc.activeLayerId = layers[layers.length - 1].id;
   return doc;
+}
+
+/** Текст из PSD: значение, шрифт и цвет; позиция — по трансформации (там базовая линия). Картинка слоя остаётся из PSD. */
+function textFromPsd(l: PsdLayer): TextData | null {
+  const t = l.text;
+  if (!t?.text) return null;
+  const tr = t.transform ?? [1, 0, 0, 1, 0, 0];
+  const st = t.style ?? {};
+  const size = Math.max(1, Math.round((st.fontSize ?? 24) * Math.abs(tr[3] || 1)));
+  const name = st.font?.name ?? 'Arial';
+  // PostScript-имя «Arial-BoldMT» → семейство «Arial»
+  const family = name.replace(/MT$|PS$/, '').split('-')[0].replace(/([a-z])([A-Z])/g, '$1 $2');
+  return {
+    value: t.text.replace(/\r/g, '\n'),
+    x: Math.round(tr[4]),
+    y: Math.round(tr[5] - size * 0.8),
+    font: `"${family}", sans-serif`,
+    size,
+    bold: !!st.fauxBold || /bold|black|heavy/i.test(name),
+    italic: !!st.fauxItalic || /italic|oblique/i.test(name),
+    antialias: t.antiAlias !== 'none',
+    color: fromColor(st.fillColor, [0, 0, 0, 255]),
+    bmTint: false,
+  };
 }
 
 function decodeTiff(file: LoadedFile): Doc {
@@ -264,6 +289,24 @@ export function encodePsd(doc: Doc): Uint8Array {
     if (hasEffects(l.effects)) base.effects = effectsToPsd(l.effects);
     if (l.mask) base.mask = { left: 0, top: 0, right: doc.width, bottom: doc.height, defaultColor: 0, disabled: !l.maskEnabled, canvas: maskToGray(l.mask) };
     if (l.color) base.layerColor = l.color;
+    // текст системным шрифтом — редактируемым текстом PSD (картинка — наша отрисовка)
+    if (l.text && !l.text.font.startsWith('bmfont:')) {
+      const t = l.text;
+      base.text = {
+        text: t.value.replace(/\n/g, '\r'),
+        transform: [1, 0, 0, 1, t.x, t.y + t.size * 0.8],
+        antiAlias: t.antialias ? 'smooth' : 'none',
+        style: {
+          font: { name: t.font.replace(/["']/g, '').split(',')[0].trim() },
+          fontSize: t.size,
+          fauxBold: t.bold,
+          fauxItalic: t.italic,
+          fillColor: toColor(t.color),
+          autoLeading: false,
+          leading: Math.round(t.size * 1.25),
+        },
+      };
+    }
     if (!b) return { ...base, left: 0, top: 0, canvas: createCanvas(1, 1) };
     return { ...base, left: b.x, top: b.y, canvas: cropCanvas(l.canvas, b) };
   });

@@ -260,6 +260,25 @@ export class Doc {
     return { layerId: layer.id, target, rect: r, before, after: ctx.getImageData(r.x, r.y, r.w, r.h) };
   }
 
+  /**
+   * Пиксели текстового слоя правятся — текст растрируется в той же записи истории
+   * (отмена вернёт и пиксели, и текст).
+   */
+  private withRasterize(ids: string[], label: string, patches: () => PixelPatch[], structFn?: () => void) {
+    // правка маски текст не трогает
+    const text = ids.some((id) => {
+      const l = this.getLayer(id);
+      return !!l?.text && !(this.editMask && l.mask);
+    });
+    if (!text && !structFn) return void this.push({ id: uid('h'), label, patches: patches() });
+    const before = this.snapshot();
+    const p = patches();
+    const set = new Set(ids);
+    if (text) this.layers = this.layers.map((l) => (set.has(l.id) && l.text ? { ...l, text: null } : l));
+    structFn?.();
+    this.push({ id: uid('h'), label, before, after: this.snapshot(), patches: p });
+  }
+
   /** Пиксельное изменение слоя в области rect (null = весь слой). */
   pixelEdit(layerId: string, rect: Rect | null, label: string, fn: PixelFn) {
     const layer = this.getLayer(layerId);
@@ -267,28 +286,30 @@ export class Doc {
     const full = { x: 0, y: 0, w: this.width, h: this.height };
     const r = rect ? intersectRect(rect, full) : full;
     if (!r) return;
-    this.push({ id: uid('h'), label, patches: [this.edit(layer, r, fn)] });
+    this.withRasterize([layerId], label, () => [this.edit(layer, r, fn)]);
+  }
+
+  /** Текстовый слой → обычный. */
+  rasterizeText(layerId: string) {
+    if (!this.getLayer(layerId)?.text) return;
+    this.change('Растрировать текст', () => {
+      this.layers = this.layers.map((l) => (l.id === layerId ? { ...l, text: null } : l));
+    });
   }
 
   /** Пиксельное изменение сразу нескольких слоёв одной записью истории. */
   multiPixelEdit(layerIds: string[], label: string, fn: PixelFn) {
     const r = { x: 0, y: 0, w: this.width, h: this.height };
-    const patches: PixelPatch[] = [];
-    for (const id of layerIds) {
-      const layer = this.getLayer(id);
-      if (layer) patches.push(this.edit(layer, r, fn));
-    }
-    if (patches.length) this.push({ id: uid('h'), label, patches });
+    const ids = layerIds.filter((id) => this.getLayer(id));
+    if (!ids.length) return;
+    this.withRasterize(ids, label, () => ids.map((id) => this.edit(this.getLayer(id)!, r, fn)));
   }
 
   /** Пиксели слоя + структурное изменение (например, выделение) одной записью истории. */
   compound(label: string, layerId: string, pixelFn: PixelFn, structFn: () => void) {
     const layer = this.getLayer(layerId);
     if (!layer) return;
-    const before = this.snapshot();
-    const patch = this.edit(layer, { x: 0, y: 0, w: this.width, h: this.height }, pixelFn);
-    structFn();
-    this.push({ id: uid('h'), label, before, after: this.snapshot(), patches: [patch] });
+    this.withRasterize([layerId], label, () => [this.edit(layer, { x: 0, y: 0, w: this.width, h: this.height }, pixelFn)], structFn);
   }
 
   private applyPatches(patches: PixelPatch[], which: 'before' | 'after') {
@@ -538,7 +559,7 @@ export class Doc {
    */
   transformAll(label: string, w: number, h: number, mapCanvas: (c: HTMLCanvasElement) => HTMLCanvasElement, mapSlice?: (s: Slice) => Slice | null) {
     this.change(label, () => {
-      this.layers = this.layers.map((l) => ({ ...l, canvas: mapCanvas(l.canvas), mask: l.mask ? mapCanvas(l.mask) : null }));
+      this.layers = this.layers.map((l) => ({ ...l, canvas: mapCanvas(l.canvas), mask: l.mask ? mapCanvas(l.mask) : null, text: null }));
       this.width = w;
       this.height = h;
       if (this.nine) this.nine = clampNine(this.nine, w, h);

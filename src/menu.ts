@@ -156,6 +156,9 @@ export const MENUS: Menu[] = [
       { label: 'Дублировать слой', action: A.duplicateLayer, enabled: hasLayer },
       { label: 'Удалить слой', action: A.deleteLayer, enabled: multiLayers },
       'sep',
+      { label: 'Править текст', action: () => A.editTextAction(), enabled: () => !!img()?.activeLayer?.text },
+      { label: 'Растрировать текст', action: A.rasterizeTextAction, enabled: () => !!img()?.activeLayer?.text },
+      'sep',
       { label: 'Новая папка из слоя', shortcut: 'Mod+G', action: A.groupActiveLayer, enabled: hasLayer },
       { label: 'Разгруппировать', shortcut: 'Shift+Mod+G', action: A.ungroupActive, enabled: () => !!img()?.activeGroupId || !!img()?.activeLayer?.group },
       {

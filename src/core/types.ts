@@ -75,6 +75,24 @@ export interface Layer {
   color?: LabelColor | null;
   /** Папка (id из Doc.groups); слои одной папки идут в списке подряд. */
   group?: string | null;
+  /** Текстовый слой: пиксели строятся из этих данных; null — обычный (растровый) слой. */
+  text?: TextData | null;
+}
+
+export interface TextData {
+  value: string;
+  /** Левый верхний угол первой строки. */
+  x: number;
+  y: number;
+  /** CSS-семейство или «bmfont:<id>» — растровый шрифт из библиотеки. */
+  font: string;
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  antialias: boolean;
+  color: RGBA;
+  /** Растровый шрифт: перекрасить глифы в color. */
+  bmTint: boolean;
 }
 
 export type LabelColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray';

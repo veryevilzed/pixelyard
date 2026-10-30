@@ -9,7 +9,7 @@ import type { Cuts, NineSlice } from '../core/types';
 import { usePatterns } from '../core/patterns';
 import { activeDoc, app, setPrefs, useApp, useCursor } from '../store';
 import { changed, getPickHook, onRenderRequest, requestRender, snapPoint, type PointerInfo, type Tool } from '../tools/base';
-import { bitmapFontId, commitText, handTool, textFont, useTextEdit } from '../tools/fill';
+import { bitmapFontId, cancelText, commitText, handTool, textFont, useTextEdit } from '../tools/fill';
 import { effectiveTool } from '../tools';
 import { useTransform } from '../tools/transform';
 import { useCrop } from '../tools/crop';
@@ -457,7 +457,10 @@ function TextEditor() {
   const fg = useApp((s) => s.fg);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    if (at) setTimeout(() => ref.current?.focus(), 0);
+    if (!at) return;
+    // фокус — после того как браузер закончит обработку нажатия (иначе он сам уведёт фокус с поля)
+    const t = setTimeout(() => ref.current?.focus(), 0);
+    return () => clearTimeout(t);
   }, [at]);
   const doc = activeDoc();
   if (!at || !doc) return null;
@@ -486,7 +489,7 @@ function TextEditor() {
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === 'Escape') useTextEdit.setState({ at: null, value: '' });
+        if (e.key === 'Escape') cancelText(doc);
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitText(doc);
       }}
       onBlur={() => commitText(doc)}

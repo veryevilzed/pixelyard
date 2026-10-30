@@ -278,6 +278,18 @@ export function LayersPanel() {
                 {l.visible ? <Eye size={14} /> : <EyeOff size={14} />}
               </button>
               {l.clip && <CornerLeftDown size={12} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />}
+              {l.text && (
+                <span
+                  className="text-badge"
+                  title="Текстовый слой — двойной клик: править текст"
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    A.editTextAction(l.id);
+                  }}
+                >
+                  T
+                </span>
+              )}
               <Thumb
                 canvas={l.canvas}
                 rev={doc.rev}
@@ -412,6 +424,12 @@ function LayerMenu({ doc, menu, onClose, onRenameGroup }: { doc: Doc; menu: { x:
           <button key={c.id} className={`label-swatch ${cur === c.id ? 'on' : ''}`} style={{ background: c.css }} title={c.label} onClick={() => setColor(c.id)} />
         ))}
       </div>
+      {layer?.text && (
+        <>
+          <button className="ctx-item" onClick={() => (A.editTextAction(layer.id), onClose())}>Править текст</button>
+          <button className="ctx-item" onClick={act(() => doc.rasterizeText(layer.id))}>Растрировать текст</button>
+        </>
+      )}
       {layer && (
         <>
           <button className="ctx-item" onClick={act(() => doc.groupLayers([layer.id]))}>Новая папка из слоя</button>

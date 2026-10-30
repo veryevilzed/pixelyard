@@ -19,6 +19,7 @@ import { TOOLS } from './tools';
 import { cancelTransform, startTransform, transformActive, type TransformMode } from './tools/transform';
 import { clearPaintHover } from './tools/paint';
 import { useCrop } from './tools/crop';
+import { editTextLayer } from './tools/fill';
 import { detachLinked, ownerAtlas, saveAtlasProject } from './atlasActions';
 import { buildIconFiles, DEFAULT_ICON } from './core/icons';
 import { isAtlas } from './core/atlasDoc';
@@ -1154,3 +1155,16 @@ export async function importBitmapFont() {
     toast(`Шрифт «${font.name}» открыт: ${font.font?.glyphs.length ?? 0} символов — выбран в инструменте «Текст»`);
   });
 }
+
+// ---------- текстовые слои ----------
+
+/** Править текст слоя: инструмент «Текст» и поле ввода с его текстом. */
+export function editTextAction(layerId?: string) {
+  const d = activeDoc();
+  const id = layerId ?? d?.activeLayerId;
+  if (!d || !id || !d.getLayer(id)?.text) return;
+  setTool('text');
+  editTextLayer(d, id);
+}
+
+export const rasterizeTextAction = withDoc((d) => d.activeLayerId && d.rasterizeText(d.activeLayerId));

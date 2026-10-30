@@ -111,11 +111,15 @@ export function snapPoint(p: Point, view: ViewState): Point {
   return { x, y };
 }
 
-/** Проверяет, можно ли рисовать на активном слое; сообщает причину, если нет. */
-export function editableLayer(doc: Doc) {
+/** Проверяет, можно ли рисовать на активном слое; сообщает причину, если нет. allowText — для текстового слоя (перемещение). */
+export function editableLayer(doc: Doc, allowText = false) {
   const l = doc.activeLayer;
   if (!l) {
     toast('Нет активного слоя', 'error');
+    return null;
+  }
+  if (l.text && !allowText && !doc.editingMask) {
+    toast(`«${l.name}» — текстовый слой: правьте его инструментом «Текст» или растрируйте (Слои → Растрировать текст)`, 'error');
     return null;
   }
   if (l.locked) {

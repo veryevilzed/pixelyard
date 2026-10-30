@@ -1,7 +1,8 @@
 import { Circle, Minus, Square } from 'lucide-react';
 import * as A from '../actions';
-import { activeDoc, openDialog, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
-import { Check, NumberField, Seg, SliderField } from './controls';
+import { activeDoc, openDialog, setFg, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
+import { applyTextOptsToLayer } from '../tools/fill';
+import { Check, ColorField, NumberField, Seg, SliderField } from './controls';
 import { TOOL_LABELS } from './Toolbox';
 import { PatternButton } from './PatternPicker';
 import { cancelTransform, commitTransform, quadAngle, quadSize, resetTransform, rotateQuad, scaleQuad, setQuad, translateQuad, TRANSFORM_MODES, useTransform } from '../tools/transform';
@@ -88,6 +89,12 @@ function SelectModeSeg({ o }: { o: ToolOptions }) {
   );
 }
 
+/** Настройка «Текста» + применение к выбранному текстовому слою. */
+const setTextOpts = (patch: Partial<ToolOptions>) => {
+  setOpts(patch);
+  applyTextOptsToLayer(activeDoc());
+};
+
 export function OptionsBar() {
   const tool = useApp((s) => s.tool);
   const o = useApp((s) => s.opts);
@@ -95,6 +102,7 @@ export function OptionsBar() {
   const transform = useTransform();
   const crop = useCrop((s) => s.rect);
   const bmFonts = useFonts((s) => s.fonts);
+  const fg = useApp((s) => s.fg);
   useApp((s) => s.tick);
 
   if (transform.active) {
@@ -326,7 +334,7 @@ export function OptionsBar() {
     case 'text':
       body = (
         <>
-          <select value={o.textFont} onChange={(e) => setOpts({ textFont: e.target.value })}>
+          <select value={o.textFont} onChange={(e) => setTextOpts({ textFont: e.target.value })}>
             <optgroup label="Системные">
               {FONTS.map((f) => (
                 <option key={f.id} value={f.id}>{f.label}</option>
@@ -341,17 +349,18 @@ export function OptionsBar() {
             )}
           </select>
           {bmFonts.length === 0 && <button className="btn small" title="Создать растровый шрифт — он появится в этом списке" onClick={() => openDialog({ kind: 'bmfont' })}>+ BMFont</button>}
-          <NumberField label="Кегль" value={o.textSize} min={4} max={1000} onChange={(v) => setOpts({ textSize: v })} suffix="px" />
+          <ColorField value={fg} onChange={(c) => (setFg(c), applyTextOptsToLayer(activeDoc()))} />
+          <NumberField label="Кегль" value={o.textSize} min={4} max={1000} onChange={(v) => setTextOpts({ textSize: v })} suffix="px" />
           {bmActive ? (
-            <Check label="Перекрасить в основной цвет" checked={o.textBmTint} onChange={(v) => setOpts({ textBmTint: v })} title="Для одноцветных (например, белых) растровых шрифтов" />
+            <Check label="Перекрасить в основной цвет" checked={o.textBmTint} onChange={(v) => setTextOpts({ textBmTint: v })} title="Для одноцветных (например, белых) растровых шрифтов" />
           ) : (
             <>
-              <Check label={<b>Ж</b>} checked={o.textBold} onChange={(v) => setOpts({ textBold: v })} />
-              <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setOpts({ textItalic: v })} />
+              <Check label={<b>Ж</b>} checked={o.textBold} onChange={(v) => setTextOpts({ textBold: v })} />
+              <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setTextOpts({ textItalic: v })} />
             </>
           )}
-          <Check label="Сглаживание" checked={o.textAntialias} onChange={(v) => setOpts({ textAntialias: v })} />
-          <span className="note">Клик — начать текст, ⌘Enter или клик снаружи — готово, Esc — отмена</span>
+          <Check label="Сглаживание" checked={o.textAntialias} onChange={(v) => setTextOpts({ textAntialias: v })} />
+          <span className="note">Клик — новый текст, клик по тексту — править, ⌘Enter или клик снаружи — готово, Esc — отмена</span>
         </>
       );
       break;

@@ -5,8 +5,9 @@ import { floodMask } from '../core/flood';
 import { tiled } from '../core/patterns';
 import { compositeForView, nextZoom, toScreen, zoomAt } from '../core/render';
 import { hardenMask, maskedCopy } from '../core/selection';
-import type { Point, RGBA } from '../core/types';
-import { app, setBg, setFg, toast } from '../store';
+import type { Point, RGBA, TextData } from '../core/types';
+import { app, setBg, setFg, setOpts, toast } from '../store';
+import { addTextLayer, textLayerAt, updateTextLayer } from '../core/textLayer';
 import { drawBitmapText, fontGlyphs, useFonts } from '../core/fontLibrary';
 import type { RenderedFont } from '../core/bmfont';
 import { changed, constrain45, editableLayer, infoLabel, requestRender, snapPoint, type Tool } from './base';
@@ -260,7 +261,8 @@ export const shapeTool: Tool = {
 
 // ---------- текст ----------
 
-export const useTextEdit = create<{ at: Point | null; value: string }>(() => ({ at: null, value: '' }));
+/** Набор текста: место, текст и слой, если правится существующий текстовый слой. */
+export const useTextEdit = create<{ at: Point | null; value: string; layerId: string | null }>(() => ({ at: null, value: '', layerId: null }));
 
 /** id растрового шрифта, если в «Тексте» выбран BMFont (значение шрифта «bmfont:<id>»). */
 export const bitmapFontId = (font = app().opts.textFont) => (font.startsWith('bmfont:') ? font.slice(7) : null);
@@ -277,41 +279,88 @@ function bitmapOpts(f: RenderedFont) {
   return { scale: o.textSize / Math.max(1, f.size), letterSpacing: 0, tint: o.textBmTint ? app().fg : null, smooth: o.textAntialias };
 }
 
-export function commitText(doc: Doc) {
-  const { at, value } = useTextEdit.getState();
-  useTextEdit.setState({ at: null, value: '' });
-  if (!at || !value.trim()) return changed();
+/** Текущие настройки инструмента → данные текстового слоя. */
+export function textDataFromOpts(value: string, at: Point): TextData {
   const o = app().opts;
-  const c = createCanvas(doc.width, doc.height);
-  const ctx = ctx2d(c);
-  const bm = bitmapFontId();
-  if (bm) {
-    void fontGlyphs(bm).then((f) => {
-      if (!f) return toast('Растровый шрифт не найден в библиотеке', 'error');
-      drawBitmapText(ctx, f, value, at.x, at.y, bitmapOpts(f));
-      doc.addLayer(doc.makeLayer(value.trim().split('\n')[0].slice(0, 32), c), 'Текст');
-      changed();
-    });
-    return;
-  }
-  ctx.font = textFont();
-  ctx.fillStyle = rgbaToCss(app().fg);
-  ctx.textBaseline = 'top';
-  const lh = Math.round(o.textSize * 1.25);
-  value.split('\n').forEach((line, i) => ctx.fillText(line, at.x, at.y + i * lh));
-  if (!o.textAntialias) hardenMask(c);
-  const name = value.trim().split('\n')[0].slice(0, 32);
-  doc.addLayer(doc.makeLayer(name, c), 'Текст');
+  return { value, x: at.x, y: at.y, font: o.textFont, size: o.textSize, bold: o.textBold, italic: o.textItalic, antialias: o.textAntialias, color: app().fg, bmTint: o.textBmTint };
+}
+
+/** Настройки инструмента из текстового слоя (при начале правки). */
+function optsFromText(t: TextData) {
+  setOpts({ textFont: t.font, textSize: t.size, textBold: t.bold, textItalic: t.italic, textAntialias: t.antialias, textBmTint: t.bmTint });
+  setFg(t.color);
+}
+
+/** Начать правку текстового слоя: его пиксели прячутся, текст — в поле ввода. */
+export function editTextLayer(doc: Doc, layerId: string) {
+  const l = doc.getLayer(layerId);
+  if (!l?.text) return;
+  doc.activeLayerId = l.id;
+  optsFromText(l.text);
+  useTextEdit.setState({ at: { x: l.text.x, y: l.text.y }, value: l.text.value, layerId: l.id });
+  doc.preview = { layerId: l.id, draw: () => {} };
+  const bm = bitmapFontId(l.text.font);
+  if (bm) void fontGlyphs(bm).then(() => requestRender());
   changed();
+}
+
+/** Отмена набора: текст слоя остаётся прежним. */
+export function cancelText(doc: Doc) {
+  const { layerId } = useTextEdit.getState();
+  useTextEdit.setState({ at: null, value: '', layerId: null });
+  if (layerId && doc.preview?.layerId === layerId) doc.preview = null;
+  changed();
+}
+
+/** Время последнего завершения набора: клик, который завершил текст, не начинает новый. */
+let lastCommit = 0;
+
+export function commitText(doc: Doc) {
+  const { at, value, layerId } = useTextEdit.getState();
+  if (at) lastCommit = performance.now();
+  useTextEdit.setState({ at: null, value: '', layerId: null });
+  if (layerId && doc.preview?.layerId === layerId) doc.preview = null;
+  if (!at) return changed();
+  const done = (p: Promise<unknown>) => void p.then(changed, (e) => toast(e instanceof Error ? e.message : String(e), 'error'));
+  if (layerId) {
+    // пустой текст — слой удаляется (как в Photoshop)
+    if (!value.trim()) {
+      if (doc.layers.length > 1) doc.removeLayer(layerId);
+      return changed();
+    }
+    return done(updateTextLayer(doc, layerId, textDataFromOpts(value, at)));
+  }
+  if (!value.trim()) return changed();
+  done(addTextLayer(doc, textDataFromOpts(value, at)));
+}
+
+/** Сменились настройки «Текста» — применить к выбранному текстовому слою (если он не правится сейчас). */
+export function applyTextOptsToLayer(doc: Doc | null) {
+  if (!doc || useTextEdit.getState().at) return requestRender();
+  const l = doc.activeLayer;
+  if (!l?.text) return;
+  const next = textDataFromOpts(l.text.value, { x: l.text.x, y: l.text.y });
+  const last = doc.undoStack[doc.undoStack.length - 1];
+  // серия изменений (кегль колёсиком) — одна запись истории
+  if (last?.label === 'Параметры текста' && last.after?.layers === doc.layers) doc.undo();
+  void updateTextLayer(doc, l.id, next, 'Параметры текста').then(changed);
 }
 
 export const textTool: Tool = {
   cursor: () => 'text',
   down(p, doc) {
     if (useTextEdit.getState().at) return commitText(doc);
-    useTextEdit.setState({ at: { x: Math.round(p.x), y: Math.round(p.y) }, value: '' });
+    // этот же клик только что завершил набор (поле ввода потеряло фокус) — новый текст не начинаем
+    if (performance.now() - lastCommit < 400) return;
+    // клик по текстовому слою — правка его текста
+    const hit = textLayerAt(doc, p.x, p.y);
+    if (hit) return editTextLayer(doc, hit.id);
+    useTextEdit.setState({ at: { x: Math.round(p.x), y: Math.round(p.y) }, value: '', layerId: null });
     const bm = bitmapFontId();
     if (bm) void fontGlyphs(bm).then(() => requestRender());
+  },
+  hover(p, doc) {
+    hoverText = !useTextEdit.getState().at && !!textLayerAt(doc, p.x, p.y);
   },
   overlay(ctx, v) {
     // предпросмотр текста растровым шрифтом во время набора
@@ -329,6 +378,8 @@ export const textTool: Tool = {
     if (doc && useTextEdit.getState().at) commitText(doc);
   },
 };
+let hoverText = false;
+textTool.cursor = () => (hoverText ? 'pointer' : 'text');
 
 // ---------- навигация ----------
 
