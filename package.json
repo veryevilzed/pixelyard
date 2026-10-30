@@ -21,6 +21,7 @@
     "ag-psd": "^34.1.0",
     "fflate": "^0.8.3",
     "lucide-react": "^1.64.0",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "utif2": "^4.1.0",

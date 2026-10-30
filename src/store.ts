@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Doc } from './core/doc';
 import type { RGBA } from './core/types';
+import type { LoadedFile } from './core/platform';
 
 export type ToolId =
   | 'move'
@@ -143,6 +144,8 @@ export type DialogState =
   | { kind: 'new-guide' }
   | { kind: 'shortcuts' }
   | { kind: 'icon' }
+  | { kind: 'pdf-import'; file: LoadedFile }
+  | { kind: 'pdf-export' }
   | { kind: 'about' };
 
 export interface ViewPrefs {

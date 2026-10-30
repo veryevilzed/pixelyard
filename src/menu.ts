@@ -75,6 +75,7 @@ export const MENUS: Menu[] = [
       { label: 'Сохранить как…', shortcut: 'Shift+Mod+S', action: () => void A.saveDoc(true), enabled: hasDoc },
       'sep',
       { label: 'Экспорт…', shortcut: 'Shift+Mod+E', action: () => (hasAtlas() ? void AT.exportAtlasAction() : openDialog({ kind: 'export' })), enabled: hasDoc },
+      { label: 'Экспорт в PDF…', action: () => openDialog({ kind: 'pdf-export' }), enabled: hasImg },
       { label: 'Экспорт слоёв по отдельности…', action: () => openDialog({ kind: 'export', source: 'layers' }), enabled: hasImg },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },

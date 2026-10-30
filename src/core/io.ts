@@ -12,10 +12,11 @@ import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffe
 export const OPEN_FILTERS: FileFilter[] = [
   {
     name: 'Изображения',
-    extensions: ['pyard', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'icns', 'svg', 'heic', 'avif'],
+    extensions: ['pyard', 'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'icns', 'svg', 'heic', 'avif'],
   },
   { name: 'Проект PixelYard', extensions: ['pyard'] },
   { name: 'Photoshop', extensions: ['psd', 'psb'] },
+  { name: 'PDF', extensions: ['pdf'] },
   { name: 'TIFF', extensions: ['tif', 'tiff'] },
 ];
 

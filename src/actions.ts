@@ -93,6 +93,11 @@ async function withBusy<T>(label: string, fn: () => Promise<T>): Promise<T | und
 
 export async function openLoadedFiles(files: LoadedFile[]) {
   for (const f of files) {
+    // PDF — сначала диалог: какую страницу или все слоями, разрешение, подложка
+    if (/\.pdf$/i.test(f.name)) {
+      openDialog({ kind: 'pdf-import', file: f });
+      continue;
+    }
     await withBusy(`Открытие ${f.name}…`, async () => addDoc(await decodeFile(f)));
   }
 }
@@ -107,7 +112,9 @@ export async function placeFiles(files?: LoadedFile[]) {
   const doc = activeDoc();
   if (!doc) return openLoadedFiles(files ?? (await openFiles(OPEN_FILTERS)));
   const list = files ?? (await openFiles(OPEN_FILTERS));
-  for (const f of list) {
+  const pdfs = list.filter((f) => /\.pdf$/i.test(f.name));
+  if (pdfs.length) await openLoadedFiles(pdfs);
+  for (const f of list.filter((x) => !/\.pdf$/i.test(x.name))) {
     await withBusy(`Импорт ${f.name}…`, async () => {
       const img = await decodeToCanvas(f);
       addImageAsLayer(doc, img, fileStem(f.name));
