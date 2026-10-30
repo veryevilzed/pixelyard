@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import * as A from './actions';
 import { addSpriteFiles, installAtlasSync, newAtlasFromFiles } from './atlasActions';
 import { isAtlas } from './core/atlasDoc';
-import { confirmDialog, isTauri, onFileDrop, setWindowTitle } from './core/platform';
+import { confirmDialog, isTauri, onFileDrop, onOpenedFiles, setWindowTitle } from './core/platform';
 import { adjustSize, cycleTool, eventShortcut, findShortcut } from './menu';
 import { activeDoc, app, openDialog, useApp } from './store';
 import { cycleTab } from './panes';
@@ -77,6 +77,16 @@ export function App() {
   }, [title]);
 
   useEffect(() => installAtlasSync(), []);
+
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    let cancelled = false;
+    void onOpenedFiles((files) => void A.openLoadedFiles(files)).then((u) => (cancelled ? u() : (un = u)));
+    return () => {
+      cancelled = true;
+      un?.();
+    };
+  }, []);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKey);

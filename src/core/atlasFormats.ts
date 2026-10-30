@@ -164,6 +164,13 @@ const tpFrame = (f: Frame) => ({
   pivot: { x: f.pivotX, y: f.pivotY },
   ...(f.nine ? { scale9Borders: { x: f.nineL, y: f.nineT, w: f.srcW - f.nineL - f.nineR, h: f.srcH - f.nineT - f.nineB } } : {}),
 });
+type Anim = { name: string; fps: number; loop: boolean; pingpong: boolean; mode: string; frames: { name: string }[] };
+const animsOf = (d: TemplateData) => ((d.animations as unknown as Anim[] | undefined) ?? []);
+/** Pixi / TexturePacker: "animations": { run: ["run_0", …] } */
+const tpAnims = (d: TemplateData) => {
+  const a = animsOf(d);
+  return a.length ? { animations: Object.fromEntries(a.map((x) => [x.name, x.frames.map((f) => f.name)])) } : {};
+};
 const tpMeta = (d: TemplateData) => ({
   app: d.app,
   version: '1.0',
@@ -181,7 +188,7 @@ export const SPRITE_FORMATS: FormatDef[] = [
     ext: 'json',
     kind: 'sprites',
     rotation: 'cw',
-    render: (d) => JSON.stringify({ frames: Object.fromEntries(framesOf(d).map((f) => [f.name, tpFrame(f)])), meta: tpMeta(d) }, null, 2),
+    render: (d) => JSON.stringify({ frames: Object.fromEntries(framesOf(d).map((f) => [f.name, tpFrame(f)])), ...tpAnims(d), meta: tpMeta(d) }, null, 2),
   },
   {
     id: 'tp-array',
@@ -189,7 +196,7 @@ export const SPRITE_FORMATS: FormatDef[] = [
     ext: 'json',
     kind: 'sprites',
     rotation: 'cw',
-    render: (d) => JSON.stringify({ frames: framesOf(d).map((f) => ({ filename: f.name, ...tpFrame(f) })), meta: tpMeta(d) }, null, 2),
+    render: (d) => JSON.stringify({ frames: framesOf(d).map((f) => ({ filename: f.name, ...tpFrame(f) })), ...tpAnims(d), meta: tpMeta(d) }, null, 2),
   },
   {
     id: 'phaser3',
@@ -213,6 +220,20 @@ export const SPRITE_FORMATS: FormatDef[] = [
         null,
         2,
       ),
+    extraFiles(d, base) {
+      const a = animsOf(d);
+      if (!a.length) return {};
+      // this.load.multiatlas(base, …); this.anims.fromJSON(cache.json.get(base + '-anims'))
+      const anims = a.map((x) => ({
+        key: x.name,
+        type: 'frame',
+        frames: x.frames.map((f) => ({ key: base, frame: f.name })),
+        frameRate: x.fps,
+        repeat: x.loop ? -1 : 0,
+        yoyo: x.pingpong,
+      }));
+      return { [`${base}-anims.json`]: JSON.stringify({ anims }, null, 2) };
+    },
   },
   {
     id: 'spine',
@@ -232,6 +253,7 @@ export const SPRITE_FORMATS: FormatDef[] = [
           'filter: Linear,Linear',
           'repeat: none',
           ...framesOf(p).flatMap((f) => [
+            // имя оставляем полным (Spine ищет вложения по имени), номер кадра анимации — в index
             f.name,
             `  rotate: ${f.rotated}`,
             `  xy: ${f.x}, ${f.y}`,
@@ -304,6 +326,95 @@ ${fr.join('\n')}
 </dict>
 </plist>
 `;
+    },
+  },
+  {
+    id: 'unity-tpsheet',
+    label: 'Unity (.tpsheet, TexturePacker Importer)',
+    ext: 'tpsheet',
+    kind: 'sprites',
+    // импортёр Unity повёрнутые кадры не поддерживает
+    rotation: false,
+    render: (d) => {
+      const H = Number(d.height);
+      const lines = framesOf(d).map((f) => {
+        // у Unity начало координат снизу; опорная точка — относительно обрезанного кадра, тоже снизу
+        const y = H - f.y - f.h;
+        const px = (f.pivotX * f.srcW - f.offX) / Math.max(1, f.w);
+        const py = ((1 - f.pivotY) * f.srcH - (f.srcH - f.offY - f.h)) / Math.max(1, f.h);
+        const bl = Math.max(0, f.nineL - f.offX), br = Math.max(0, f.nineR - (f.srcW - f.offX - f.w));
+        const bt = Math.max(0, f.nineT - f.offY), bb = Math.max(0, f.nineB - (f.srcH - f.offY - f.h));
+        const r = (v: number) => Math.round(v * 10000) / 10000;
+        return `${f.name.replace(/[;\s]/g, '_')};${f.x};${y};${f.w};${f.h}; ${r(px)};${r(py)}; ${bl};${br};${bt};${bb}`;
+      });
+      return [
+        '#',
+        '# Sprite sheet data for Unity.',
+        '#',
+        '# To import these sprites into your Unity project, download "TexturePackerImporter":',
+        '# https://www.codeandweb.com/texturepacker/unity',
+        '#',
+        `# Created by ${d.app}`,
+        '#',
+        ':format=40300',
+        `:texture=${d.image}`,
+        `:size=${d.width}x${d.height}`,
+        ':pivotpoints=enabled',
+        ':borders=enabled',
+        ':alphahandling=ClearTransparentPixels',
+        '',
+        ...lines,
+        '',
+      ].join('\n');
+    },
+  },
+  {
+    id: 'godot-spriteframes',
+    label: 'Godot 4 (SpriteFrames .tres)',
+    ext: 'tres',
+    kind: 'sprites',
+    rotation: false,
+    multi: 'single',
+    render: (d) => {
+      const pages = pagesOf(d);
+      const ext = pages.map((p, i) => `[ext_resource type="Texture2D" path="${p.image}" id="${i + 1}_page"]`);
+      const subs: string[] = [];
+      const idOf = new Map<string, string>();
+      pages.forEach((p, pi) =>
+        framesOf(p).forEach((f) => {
+          const id = `AtlasTexture_${subs.length + 1}`;
+          idOf.set(f.name, id);
+          // margin восстанавливает исходный размер обрезанного кадра
+          subs.push(
+            `[sub_resource type="AtlasTexture" id="${id}"]\natlas = ExtResource("${pi + 1}_page")\nregion = Rect2(${f.x}, ${f.y}, ${f.w}, ${f.h})` +
+              (f.trimmed ? `\nmargin = Rect2(${f.offX}, ${f.offY}, ${f.srcW - f.w}, ${f.srcH - f.h})` : '') +
+              '\nfilter_clip = true',
+          );
+        }),
+      );
+      const anims = animsOf(d);
+      const inAnim = new Set(anims.flatMap((a) => a.frames.map((f) => f.name)));
+      // спрайты вне анимаций — анимации из одного кадра, чтобы каждый был доступен по имени
+      const list = [
+        ...anims.map((a) => ({ name: a.name, fps: a.fps, loop: a.loop, frames: a.pingpong && a.frames.length > 2 ? [...a.frames, ...a.frames.slice(1, -1).reverse()] : a.frames })),
+        ...pages.flatMap((p) => framesOf(p)).filter((f) => !inAnim.has(f.name)).map((f) => ({ name: f.name, fps: 5, loop: false, frames: [{ name: f.name }] })),
+      ];
+      const animText = list
+        .map(
+          (a) =>
+            `{\n"frames": [${a.frames.filter((f) => idOf.has(f.name)).map((f) => `{\n"duration": 1.0,\n"texture": SubResource("${idOf.get(f.name)}")\n}`).join(', ')}],\n"loop": ${a.loop},\n"name": &${JSON.stringify(a.name)},\n"speed": ${a.fps.toFixed(1)}\n}`,
+        )
+        .join(', ');
+      return [
+        `[gd_resource type="SpriteFrames" load_steps=${ext.length + subs.length + 1} format=3]`,
+        '',
+        ...ext,
+        '',
+        ...subs.flatMap((x) => [x, '']),
+        '[resource]',
+        `animations = [${animText}]`,
+        '',
+      ].join('\n');
     },
   },
   {

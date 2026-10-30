@@ -1420,3 +1420,6 @@ code {
 .atlas-side > .panel.grow {
   flex: 1 0 auto;
 }
+.pivot-grid button {
+  background: var(--bg4);
+}

@@ -19,8 +19,9 @@
 
 > **English:** PixelYard is a desktop image editor for game and UI asset preparation:
 > layers with Photoshop-style effects and masks, slicing (grid, auto, knife, 9-slice),
-> sprite-sheet packing to TexturePacker / Phaser / Spine / Starling / Cocos or your own
-> template, BMFont bitmap-font generator, curves and colour adjustments, perspective
+> an atlas editor (multi-page atlases, rotation, live sprite editing, animations, 9-slice,
+> export in several scales to TexturePacker / Phaser / Spine / Starling / Cocos / Unity / Godot
+> or your own template, `.pyard` project files), BMFont bitmap-font generator, curves and colour adjustments, perspective
 > transform, PSD in and out. The interface is in Russian.
 
 ![PixelYard](docs/screenshots/main.jpg)
@@ -41,10 +42,22 @@
 - **Нож:** линии реза мышью, с шагом или по направляющим. Куски превращаются в слои или слайсы, или сразу сохраняются отдельными файлами.
 - **Экспорт** каждого слоя или слайса в отдельный файл (PNG, WebP, JPG, TIFF): обрезка по содержимому, поля, масштабы @1x/@2x/@3x, JSON с координатами.
 
+### Редактор атласов
+![Редактор атласов](docs/screenshots/atlas.jpg)
+
+- Атлас — отдельный документ-проект: спрайты по папкам, поиск, добавление файлов (перетаскиванием), слоёв или слайсов открытой картинки.
+- **Клик по спрайту в атласе** — выделение, ⇧/⌘ и рамка — несколько сразу; свойства применяются ко всем выбранным: **масштаб**, обрезка, extrude, разрешение поворота, **опорная точка**, **9-slice**, папка.
+- **Двойной клик — правка спрайта** в своей вкладке со слоями; атлас **перестраивается на лету** (удобно в сплите рядом).
+- **Несколько страниц** (мультитекстура), **вращение** на 90° (выключается), расстановка: «наилучший» перебор, MaxRects с пятью эвристиками, полки, сетка, **по алфавиту**.
+- **Анимации**: собираются по именам `run_0, run_1…` или из выбранных, fps и режим (повтор, туда-обратно, один раз), превью в панели.
+- **Выгрузка сразу в нескольких масштабах** (×0.5, ×1, ×2, ×4 со своими суффиксами), **PNG / WebP / JPEG**, в папку или ZIP; настройки запоминаются.
+- Форматы: TexturePacker JSON, **Phaser 3** (+ анимации), **Spine / libGDX**, Starling, Cocos2d, **Unity** (`.tpsheet`), **Godot 4** (`SpriteFrames .tres`), CSS, CSV, свои шаблоны.
+- **Проект `.pyard`** — один файл (zip): спрайты, многослойные исходники (PSD), настройки и анимации. Открывается двойным кликом в Finder.
+
 ### Спрайтшиты
 ![Спрайтшит](docs/screenshots/spritesheet.jpg)
 
-- Упаковка MaxRects из слоёв, слайсов или **просто набора PNG-файлов**.
+- Быстрая упаковка из слоёв, слайсов или **просто набора PNG-файлов**; кнопка «Открыть как проект атласа» переносит всё в редактор атласов.
 - Обрезка прозрачного, зазоры, **extrude** против швов, размер степенью двойки или квадратом, несколько масштабов.
 - Форматы описания: **TexturePacker JSON Hash и Array** (Pixi, Phaser 2), **Phaser 3**, **Spine / libGDX** `.atlas`, **Starling / Sparrow** XML, **Cocos2d** `.plist`, CSS-спрайты, CSV.
 - **Свой формат** — шаблон с подстановками:
@@ -60,7 +73,7 @@
 - Любой системный шрифт или свой TTF/OTF/WOFF. Наборы символов: ASCII, латиница + кириллица, цифры или свой.
 - Заливка цветом или **градиентом по высоте строки**, одинаковым для всех букв.
 - Эффекты: обводка, тень, свечение, внутренняя тень. Кернинг, межбуквенный и межстрочный интервал.
-- Вывод: **BMFont `.fnt`** (текстовый и XML), JSON, **сетка** (только PNG или PNG + JSON), свой шаблон.
+- Вывод: **BMFont `.fnt`** (текстовый и XML), JSON, **сетка** (только PNG или PNG + JSON), свой шаблон; картинка PNG или **WebP**.
 - Атлас можно открыть обычным документом и дорисовать руками.
 
 ### Слои и стили

@@ -38,6 +38,17 @@
       "icons/icon.icns",
       "icons/icon.png"
     ],
-    "category": "GraphicsAndDesign"
+    "category": "GraphicsAndDesign",
+    "fileAssociations": [
+      {
+        "ext": [
+          "pyard"
+        ],
+        "name": "PixelYard Project",
+        "description": "Проект атласа PixelYard",
+        "role": "Editor",
+        "mimeType": "application/x-pixelyard"
+      }
+    ]
   }
 }

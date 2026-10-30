@@ -135,3 +135,20 @@ export async function onFileDrop(cb: (files: LoadedFile[]) => void): Promise<() 
     window.removeEventListener('drop', drop);
   };
 }
+
+/**
+ * Файлы, открытые из Finder (двойной клик по .pyard, «Открыть с помощью»). Событие лишь будит —
+ * пути забираются из очереди Rust, поэтому файл не откроется дважды.
+ */
+export async function onOpenedFiles(cb: (files: LoadedFile[]) => void): Promise<() => void> {
+  if (!isTauri) return () => {};
+  const { invoke } = await import('@tauri-apps/api/core');
+  const { listen } = await import('@tauri-apps/api/event');
+  const drain = async () => {
+    const paths = await invoke<string[]>('take_opened_files');
+    if (paths.length) cb(await Promise.all(paths.map(readPath)));
+  };
+  const un = await listen('open-files', () => void drain());
+  await drain();
+  return un;
+}

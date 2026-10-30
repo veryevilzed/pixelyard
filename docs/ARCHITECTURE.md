@@ -11,7 +11,10 @@ Tauri 2 (Rust) + React 19 + TypeScript + Canvas 2D. Репозиторий: `git
 - В dev-режиме модули доступны в консоли: `window.__pe = { store, actions, canvas, types, base, transform }`
   (`src/main.tsx`). После HMR `__pe` может указывать на старые экземпляры — перезагружать страницу.
 - Тестирование в Chrome (MCP claude-in-chrome): координаты скриншота ≠ CSS-пикселям (масштаб ~0.8),
-  брать `getBoundingClientRect() * 1456/innerWidth`. Модификаторы мыши (⌘) автоматика не передаёт.
+  брать `getBoundingClientRect() * 1456/innerWidth`. ⇧-клик автоматика передаёт.
+  `pointerdown.detail` в Chrome всегда 0 — двойной клик ловится родным `dblclick` (Viewport).
+  Перезагрузка страницы блокируется `beforeunload`, если есть несохранённые документы —
+  в консоли `__pe.store.app().docs.forEach(d => d.savedRev = d.rev)` перед `location.href = …`.
 - Релиз: `npm run release` (подпись, нотаризация, публикация на GitHub; см. README и скилл
   `~/.claude/skills/apple-sign-release`). Публичные действия (gh release, gh repo edit) запускает
   пользователь — авто-режим их блокирует.
@@ -37,6 +40,16 @@ Tauri 2 (Rust) + React 19 + TypeScript + Canvas 2D. Репозиторий: `git
 - `bump()` / `changed()` (`tools/base.ts`) — перерисовка UI и холста; `requestRender()` — только холст.
 - Области (сплит): `src/panes.ts` — `addDocToFocused`, `moveDoc`, `splitWith`, `mergePanes`, `paneSizes`.
 
+## Атлас (уровень приложения)
+
+- `src/atlasActions.ts` — создание атласа, добавление/удаление спрайтов, `editSpriteAction`
+  (вкладка с `doc.link`), `installAtlasSync` (подписка на `tick`: перепаковка после undo и перенос
+  правок связанных вкладок с задержкой 150 мс), `saveAtlasProject`, `exportAtlasAction`.
+- `effectiveTool()` подменяет инструмент на `tools/atlasTool.ts`, когда активен атлас (кроме руки/лупы).
+- Меню: пункты, меняющие пиксели, проверяют `hasImg`/`img()` (не атлас); меню «Атлас».
+- Интерфейс: `ui/panels/AtlasPanel.tsx` (спрайты, свойства, анимации, выгрузка), `AtlasOptions` в `OptionsBar.tsx`.
+- Tauri: `bundle.fileAssociations` (.pyard) + `RunEvent::Opened` → очередь `take_opened_files` → `onOpenedFiles`.
+
 ## Инструменты (`src/tools/`)
 
 - Интерфейс `Tool` (`base.ts`): `down/drag/hover/up/dblclick/key/overlay/cursor/deactivate`.
@@ -51,8 +64,15 @@ Tauri 2 (Rust) + React 19 + TypeScript + Canvas 2D. Репозиторий: `git
 - `io.ts` — открытие (PSD через ag-psd с эффектами/масками, TIFF, TGA, браузерные форматы),
   `encodeCanvas` (PNG/JPG/WebP/TIFF; WebP в WebKit — Rust-команда `encode_webp`), `encodePsd`.
 - `export.ts` — экспорт слоёв/слайсов, `writeFiles(files, zipStem, asZip)` (папка в Tauri или zip).
-- `pack.ts` — упаковщик (сейчас MaxRects short-side, одна страница) — **переписать по TODO**.
-- `atlasFormats.ts` — форматы спрайтшитов + шаблонизатор `renderTemplate` (Mustache-подмножество),
+- `pack.ts` — упаковщик: `packPages` (MaxRects 5 эвристик, полки, сетка, «наилучший», вращение,
+  страницы, штраф за вытянутость страницы), `pack()` — одна страница (BMFont, спрайтшит).
+- `atlas.ts` — модель атласа (`AtlasState`: спрайты, анимации, настройки упаковки и выгрузки),
+  `buildAtlas`, `exportAtlasFiles`, `.pyard` (`encodeProject/decodeProject`), `detectAnimations`.
+- `atlasDoc.ts` — атлас как `Doc` (`kind: 'atlas'`): `syncAtlas` пересобирает слой страницы из
+  `doc.atlas` (сравнение по ссылке), `updateAtlas/updateSprites` — правки через историю,
+  `replaceSpriteImage` — правка из связанной вкладки без истории (патчит и снимки).
+- `atlasFormats.ts` — форматы спрайтшитов (`rotation: cw|ccw|false`, `multi: per-page|single`,
+  `extraFiles`), `describeAtlas` (файлы описания по страницам), шаблонизатор `renderTemplate`,
   свои форматы в localStorage `pixelyard.formats`.
 - `spritesheet.ts` — `packSprites`, `buildSheetFiles` (масштабы + формат).
 - `bmfont.ts` — рендер глифов, кернинг, `packFont`, `gridFont`, форматы .fnt/XML/JSON.

@@ -196,8 +196,8 @@ function scaled(img: HTMLCanvasElement, s: number, smooth: boolean) {
 
 /** Номер кадра в анимации — libGDX/Spine `index`. */
 function animIndex(state: AtlasState) {
-  const m = new Map<string, number>();
-  for (const a of state.animations) a.frames.forEach((id, i) => m.has(id) || m.set(id, i));
+  const m = new Map<string, { i: number; name: string }>();
+  for (const a of state.animations) a.frames.forEach((id, i) => m.has(id) || m.set(id, { i, name: a.name }));
   return m;
 }
 
@@ -211,7 +211,8 @@ export function atlasPackInputs(state: AtlasState, scale: number): PackInput[] {
     const trim = sp.trim === 'inherit' ? o.trim : sp.trim === 'on';
     const extra: Record<string, number | string> = { spriteId: sp.id, pivotX: sp.pivotX, pivotY: sp.pivotY };
     if (sp.nine) Object.assign(extra, { nineL: Math.round(sp.nine.left * k), nineT: Math.round(sp.nine.top * k), nineR: Math.round(sp.nine.right * k), nineB: Math.round(sp.nine.bottom * k) });
-    if (idx.has(sp.id)) extra.index = idx.get(sp.id)!;
+    const an = idx.get(sp.id);
+    if (an) Object.assign(extra, { index: an.i, anim: an.name });
     const name = frameName(sp, o);
     const base = trimSprite(name, img, trim, extra) ?? { name, canvas: createCanvas(0, 0), offX: 0, offY: 0, srcW: img.width, srcH: img.height, extra };
     return { ...base, noRotate: !sp.rotate, extrude: sp.extrude ?? undefined };

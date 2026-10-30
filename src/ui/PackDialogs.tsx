@@ -8,7 +8,10 @@ import {
   CHARSETS, DEFAULT_FONT, FONT_FORMATS, FONT_VARS, fontTemplateData, gridFont, isEmptyGlyph, packFont, renderFont,
   type FontSettings, type RenderedFont,
 } from '../core/bmfont';
-import { createCanvas, ctx2d, cropCanvas, uid } from '../core/canvas';
+import { alphaBounds, createCanvas, ctx2d, cropCanvas, uid } from '../core/canvas';
+import { newAtlasAction } from '../atlasActions';
+import { splitSpritePath } from '../core/atlas';
+import { isAtlas, syncAtlas } from '../core/atlasDoc';
 import { renderLayer } from '../core/composite';
 import { Doc } from '../core/doc';
 import { writeFiles } from '../core/export';
@@ -318,6 +321,34 @@ export function SpriteSheetDialog({ d }: { d: Extract<DialogState, { kind: 'spri
     }
   };
 
+  /** Те же спрайты и настройки — в атлас-документ. */
+  const openAsAtlas = () => {
+    const list = sprites
+      .map((sp) => {
+        const b = alphaBounds(sp.canvas);
+        return b ? { ...splitSpritePath(sp.name.replace(/\s*\/\s*/g, '/')), image: cropCanvas(sp.canvas, b) } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x);
+    const ad = newAtlasAction(list, o.name || 'atlas');
+    if (isAtlas(ad)) {
+      ad.atlas = {
+        ...ad.atlas,
+        settings: { ...ad.atlas.settings, maxSize: o.maxSize, spacing: o.spacing, border: o.border, extrude: o.extrude, pot: o.pot, square: o.square, trim: o.trim },
+        export: {
+          ...ad.atlas.export,
+          formatId: format?.id ?? ad.atlas.export.formatId,
+          imageFormat: o.imageFormat === 'tiff' ? 'png' : o.imageFormat,
+          quality: o.quality,
+          smoothScale: o.smoothScale,
+          scales: ad.atlas.export.scales.map((x) => ({ ...x, enabled: (o.scales.length ? o.scales : [1]).includes(x.scale) })),
+        },
+      };
+      syncAtlas(ad);
+      ad.savedRev = -1;
+    }
+    closeDialog();
+  };
+
   const items = source === 'layers' && doc ? [...doc.layers].reverse().map((l) => ({ id: l.id, name: l.name })) : source === 'slices' && doc ? doc.slices.map((s) => ({ id: s.id, name: s.name })) : [];
   const p = packed.p;
   return (
@@ -327,7 +358,11 @@ export function SpriteSheetDialog({ d }: { d: Extract<DialogState, { kind: 'spri
       width={1180}
       footer={
         <>
-          <span className="left note">{busy ? 'Сборка…' : 'Картинка + файл описания для каждого масштаба'}</span>
+          <span className="left">
+            <button className="btn" disabled={!sprites.length || busy} onClick={openAsAtlas} title="Атлас-документ: правка спрайтов, анимации, несколько страниц, сохранение в .pyard">
+              Открыть как проект атласа
+            </button>
+          </span>
           <button className="btn" onClick={closeDialog}>Отмена</button>
           <button className="btn" disabled={!p || busy} onClick={() => void run(true)}>В ZIP…</button>
           <button className="btn primary" disabled={!p || busy} onClick={() => void run(false)}>Сохранить в папку…</button>
@@ -422,6 +457,9 @@ export function BMFontDialog() {
   const [name, setName] = useState('font');
   const [mode, setMode] = useState<FontMode>(() => localStorage.getItem('pixelyard.bmfont.mode') ?? 'fnt');
   const [columns, setColumns] = useState(16);
+  // формат картинки шрифта запоминается вместе с настройками
+  const [img, setImg] = useState<{ format: 'png' | 'webp'; quality: number }>(() => ({ format: 'png', quality: 100, ...JSON.parse(localStorage.getItem('pixelyard.bmfont.image') ?? '{}') }));
+  const imageName = `${name}.${img.format}`;
   const [packO, setPackO] = useState({ maxSize: 1024, spacing: 2, border: 0, extrude: 0, pot: true, square: false });
   const [sample, setSample] = useState('PixelYard 0123456789\nThe quick brown fox jumps!');
   const [bg, setBg] = useState<'dark' | 'light' | 'checker'>('dark');
@@ -499,11 +537,11 @@ export function BMFontDialog() {
   const dataPreview = useMemo(() => {
     if (!font || !layout) return '';
     if (layout.grid) {
-      return mode === 'grid' ? 'Только картинка-сетка: символы идут по порядку набора, слева направо, сверху вниз.' : JSON.stringify(gridMeta(font, layout.grid, `${name}.png`), null, 2).split('\n').slice(0, 60).join('\n');
+      return mode === 'grid' ? 'Только картинка-сетка: символы идут по порядку набора, слева направо, сверху вниз.' : JSON.stringify(gridMeta(font, layout.grid, imageName), null, 2).split('\n').slice(0, 60).join('\n');
     }
     if (!layout.packed || !format) return '';
-    return format.render(fontTemplateData(font, layout.packed, `${name}.png`, s)).split('\n').slice(0, 60).join('\n');
-  }, [font, layout, format, name, s, mode]);
+    return format.render(fontTemplateData(font, layout.packed, imageName, s)).split('\n').slice(0, 60).join('\n');
+  }, [font, layout, format, imageName, s, mode]);
 
   const loadFont = async () => {
     const picked = await openFiles([{ name: 'Шрифты', extensions: ['ttf', 'otf', 'woff', 'woff2'] }], false);
@@ -526,11 +564,12 @@ export function BMFontDialog() {
     if (!font || !layout?.canvas) return;
     localStorage.setItem('pixelyard.bmfont', JSON.stringify(s));
     localStorage.setItem('pixelyard.bmfont.mode', mode);
+    localStorage.setItem('pixelyard.bmfont.image', JSON.stringify(img));
     try {
       const files: Record<string, Uint8Array> = {};
-      files[`${name}.png`] = await encodeCanvas(layout.canvas, 'png');
-      if (layout.grid && mode === 'grid-json') files[`${name}.json`] = new TextEncoder().encode(JSON.stringify(gridMeta(font, layout.grid, `${name}.png`), null, 2));
-      if (layout.packed && format) files[`${name}.${format.ext}`] = new TextEncoder().encode(format.render(fontTemplateData(font, layout.packed, `${name}.png`, s)));
+      files[imageName] = await encodeCanvas(layout.canvas, img.format, img.quality);
+      if (layout.grid && mode === 'grid-json') files[`${name}.json`] = new TextEncoder().encode(JSON.stringify(gridMeta(font, layout.grid, imageName), null, 2));
+      if (layout.packed && format) files[`${name}.${format.ext}`] = new TextEncoder().encode(format.render(fontTemplateData(font, layout.packed, imageName, s)));
       const res = await writeFiles(files, name, asZip);
       if (res) toast(`Шрифт сохранён: ${res.files} файл(а) → ${res.target}`);
     } catch (e) {
@@ -686,6 +725,10 @@ export function BMFontDialog() {
               <Check label="Степень двойки" checked={packO.pot} onChange={(pot) => setPackO({ ...packO, pot })} />
             </Line>
           )}
+          <Line label="Картинка">
+            <Seg value={img.format} onChange={(format) => setImg({ ...img, format })} options={[{ id: 'png', label: 'PNG' }, { id: 'webp', label: 'WebP' }]} />
+            {img.format === 'webp' && <NumberField label="Кач." value={img.quality} min={1} max={100} width={40} onChange={(quality) => setImg({ ...img, quality: Math.round(quality) })} title="100 = без потерь" />}
+          </Line>
           <RangeRow label="Зазор" value={packO.spacing} min={0} max={16} suffix="px" onChange={(spacing) => setPackO({ ...packO, spacing })} />
           <RangeRow label="Поля глифа" value={s.padding} min={0} max={16} suffix="px" onChange={(padding) => set({ padding })} />
         </div>

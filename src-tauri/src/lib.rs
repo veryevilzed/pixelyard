@@ -1,5 +1,17 @@
 use tauri::ipc::{InvokeBody, Request, Response};
+use std::sync::Mutex;
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+use tauri::{Emitter, Manager};
+
+/// Файлы, открытые через Finder (двойной клик по .pyard и т.п.) до того, как интерфейс готов.
+#[derive(Default)]
+struct OpenedFiles(Mutex<Vec<String>>);
+
+/// Интерфейс забирает накопленные пути при старте; дальше приходят события "open-files".
+#[tauri::command]
+fn take_opened_files(state: tauri::State<OpenedFiles>) -> Vec<String> {
+    std::mem::take(&mut *state.0.lock().unwrap())
+}
 
 /// Кодирует RGBA в WebP: WebKit не умеет canvas.toBlob("image/webp").
 /// Пиксели приходят сырым телом запроса, параметры — в заголовках.
@@ -68,8 +80,26 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(OpenedFiles::default())
         .menu(build_menu)
-        .invoke_handler(tauri::generate_handler![encode_webp])
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска PixelYard");
+        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files])
+        .build(tauri::generate_context!())
+        .expect("ошибка запуска PixelYard")
+        .run(|app, event| {
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let tauri::RunEvent::Opened { urls } = event {
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                if paths.is_empty() {
+                    return;
+                }
+                app.state::<OpenedFiles>().0.lock().unwrap().extend(paths.clone());
+                let _ = app.emit("open-files", paths);
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+            let _ = (app, event);
+        });
 }
