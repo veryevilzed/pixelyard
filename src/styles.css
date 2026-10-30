@@ -1271,3 +1271,152 @@ code {
 .panel-body.list > * {
   flex-shrink: 0;
 }
+
+/* ---------- атлас ---------- */
+.btn.small {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.tag {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg4);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.error-text {
+  color: var(--danger);
+}
+.atlas-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.atlas-pages .dim,
+.atlas-row .dim,
+.row-fields .dim {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.atlas-row .dim {
+  margin-left: auto;
+}
+.atlas-row {
+  height: 34px;
+}
+.atlas-row .layer-thumb {
+  width: 28px;
+  height: 28px;
+}
+.atlas-row.nested {
+  padding-left: 16px;
+}
+.atlas-search {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.atlas-folder {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg1);
+  border-bottom: 1px solid var(--line-soft);
+}
+.row-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.row-fields > * {
+  flex-shrink: 0;
+}
+.row-fields input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.atlas-props select {
+  min-width: 0;
+}
+.pivot-grid {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 10px);
+  gap: 2px;
+}
+.pivot-grid button {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg3);
+}
+.pivot-grid button.on {
+  background: #ff8c00;
+  border-color: #ff8c00;
+}
+.icon-select {
+  height: 20px;
+  font-size: 11px;
+  max-width: 120px;
+}
+.anim-head {
+  display: flex;
+  gap: 8px;
+}
+.anim-preview {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background-image: conic-gradient(#555 25%, #444 0 50%, #555 0 75%, #444 0);
+  background-size: 8px 8px;
+  image-rendering: pixelated;
+}
+.anim-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.anim-frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.anim-frame {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  line-height: 0;
+}
+.anim-frame.on {
+  border-color: #ff8c00;
+}
+.anim-frame .layer-thumb {
+  width: 24px;
+  height: 24px;
+}
+/* в атласе панели не сжимаются — боковая колонка прокручивается целиком */
+.atlas-side > .panel {
+  flex-shrink: 0;
+}
+.atlas-side > .panel.grow {
+  flex: 1 0 auto;
+}

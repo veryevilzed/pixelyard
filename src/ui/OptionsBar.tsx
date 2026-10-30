@@ -8,6 +8,58 @@ import { cancelTransform, commitTransform, quadAngle, quadSize, resetTransform, 
 import { quadCenter } from '../core/warp';
 import { applyCrop, useCrop } from '../tools/crop';
 import { changed } from '../tools/base';
+import { isAtlas, updateAtlas } from '../core/atlasDoc';
+import { atlasFormat, type AtlasSettings } from '../core/atlas';
+import { ALGORITHMS, HEURISTICS, SORTS } from '../core/pack';
+import type { Doc } from '../core/doc';
+
+/** Параметры упаковки атласа (в истории, одна запись на серию изменений одного поля). */
+function AtlasOptions({ doc }: { doc: Doc }) {
+  const o = doc.atlas!.settings;
+  const set = (patch: Partial<AtlasSettings>) => {
+    const label = 'Настройки упаковки';
+    const last = doc.undoStack[doc.undoStack.length - 1];
+    if (last?.label === label && last.after?.atlas === doc.atlas && Object.keys(patch).every((k) => typeof patch[k as keyof AtlasSettings] === 'number')) doc.undo();
+    updateAtlas(doc, label, (a) => ({ ...a, settings: { ...a.settings, ...patch } }));
+    changed();
+  };
+  const noRot = atlasFormat(doc.atlas!).rotation === false;
+  return (
+    <div className="optionsbar">
+      <span className="tool-name">Атлас</span>
+      <select value={o.algorithm} onChange={(e) => set({ algorithm: e.target.value as AtlasSettings['algorithm'] })} title="Алгоритм расстановки">
+        {ALGORITHMS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+      </select>
+      {o.algorithm === 'maxrects' && (
+        <select value={o.heuristic} onChange={(e) => set({ heuristic: e.target.value as AtlasSettings['heuristic'] })} title="Эвристика MaxRects">
+          {HEURISTICS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+        </select>
+      )}
+      {o.algorithm !== 'best' && (
+        <select value={o.sort} onChange={(e) => set({ sort: e.target.value as AtlasSettings['sort'] })} title="Порядок спрайтов (по алфавиту + полки = алфавитная раскладка)">
+          {SORTS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+        </select>
+      )}
+      <Check label="Вращение" checked={o.allowRotation && !noRot} onChange={(v) => set({ allowRotation: v })} title={noRot ? 'Выбранный формат не поддерживает повёрнутые кадры' : 'Поворачивать спрайты на 90° для плотной упаковки'} />
+      <span className="divider" />
+      <span className="field">
+        <span className="label static">Макс.</span>
+        <select value={o.maxSize} onChange={(e) => set({ maxSize: Number(e.target.value) })}>
+          {[256, 512, 1024, 2048, 4096, 8192].map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </span>
+      <Check label="Степень 2" checked={o.pot} onChange={(v) => set({ pot: v })} />
+      <Check label="Квадрат" checked={o.square} onChange={(v) => set({ square: v })} />
+      <Check label="Несколько страниц" checked={o.multipage} onChange={(v) => set({ multipage: v })} title="Если не помещается в максимальный размер — следующая текстура" />
+      <span className="divider" />
+      <NumberField label="Зазор" value={o.spacing} min={0} max={64} width={34} onChange={(v) => set({ spacing: Math.round(v) })} suffix="px" />
+      <NumberField label="Отступ" value={o.border} min={0} max={64} width={34} onChange={(v) => set({ border: Math.round(v) })} suffix="px" />
+      <NumberField label="Extrude" value={o.extrude} min={0} max={16} width={30} onChange={(v) => set({ extrude: Math.round(v) })} suffix="px" />
+      <Check label="Обрезать прозрачное" checked={o.trim} onChange={(v) => set({ trim: v })} />
+      <Check label="Путь в имени" checked={o.includeFolder} onChange={(v) => set({ includeFolder: v })} title="Имя кадра с папкой: ui/button" />
+    </div>
+  );
+}
 
 const FONTS = [
   { id: '-apple-system, Helvetica, Arial, sans-serif', label: 'Системный' },
@@ -71,6 +123,9 @@ export function OptionsBar() {
       </div>
     );
   }
+
+  const ad = activeDoc();
+  if (isAtlas(ad) && tool !== 'hand' && tool !== 'zoom') return <AtlasOptions doc={ad} />;
 
   const label = TOOL_LABELS[tool];
   let body: React.ReactNode = null;

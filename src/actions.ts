@@ -18,6 +18,8 @@ import { TOOLS } from './tools';
 import { cancelTransform, startTransform, transformActive, type TransformMode } from './tools/transform';
 import { clearPaintHover } from './tools/paint';
 import { useCrop } from './tools/crop';
+import { detachLinked, ownerAtlas, saveAtlasProject } from './atlasActions';
+import { isAtlas } from './core/atlasDoc';
 import { activateDoc, addDocToFocused, focusPane, removeDocFromPanes, sizeForDoc } from './panes';
 
 // ---------- документы ----------
@@ -52,7 +54,9 @@ export async function closeDoc(id: string) {
   const s = app();
   const doc = s.docs.find((d) => d.id === id);
   if (!doc) return;
-  if (doc.dirty && !(await confirmDialog(`Закрыть «${doc.name}» без сохранения изменений?`))) return;
+  // правки связанной вкладки уже в атласе — картинка и слои остаются в нём
+  if (doc.link && ownerAtlas(doc)) detachLinked(doc);
+  else if (doc.dirty && !(await confirmDialog(`Закрыть «${doc.name}» без сохранения изменений?`))) return;
   if (doc.id === s.activeId) deactivateTool();
   removeDocFromPanes(id);
   useApp.setState({ docs: s.docs.filter((d) => d.id !== id) });
@@ -139,6 +143,9 @@ export async function saveDoc(as = false) {
   const doc = activeDoc();
   if (!doc) return;
   commitPending();
+  // атлас и вкладки его спрайтов сохраняются проектом .pyard
+  const atlas = ownerAtlas(doc);
+  if (atlas && isAtlas(atlas)) return saveAtlasProject(atlas, as && atlas === doc);
   await withBusy('Сохранение…', async () => {
     if (!as && doc.path && isTauri) {
       await writePath(doc.path, await encodeForPath(doc, doc.path));
@@ -236,8 +243,14 @@ function withDoc(fn: (doc: Doc) => void) {
   };
 }
 
-export const selectAllAction = withDoc((d) => d.setSelection(selectAll(d.width, d.height), 'Выделить всё'));
-export const deselect = withDoc((d) => d.setSelection(null));
+export const selectAllAction = withDoc((d) => {
+  if (isAtlas(d)) d.atlasSel = d.atlas.sprites.map((s) => s.id);
+  else d.setSelection(selectAll(d.width, d.height), 'Выделить всё');
+});
+export const deselect = withDoc((d) => {
+  if (isAtlas(d)) d.atlasSel = [];
+  else d.setSelection(null);
+});
 export const invertSel = withDoc((d) => d.setSelection(invertSelection(d.selection ?? null, d.width, d.height) ?? (d.selection ? null : selectAll(d.width, d.height)), 'Инверсия выделения'));
 export const selectLayerAlpha = withDoc((d) => {
   const l = d.activeLayer;

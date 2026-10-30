@@ -188,7 +188,7 @@ interface AppState {
   dialog: DialogState | null;
   toast: { text: string; kind: 'info' | 'error'; id: number } | null;
   busy: string | null;
-  panels: { navigator: boolean; color: boolean; layers: boolean; slices: boolean; history: boolean; info: boolean };
+  panels: { navigator: boolean; color: boolean; layers: boolean; slices: boolean; history: boolean; info: boolean; atlas: boolean; sprite: boolean; anims: boolean; atlasExport: boolean };
 }
 
 const savedOpts = (() => {
@@ -238,7 +238,7 @@ export const useApp = create<AppState>(() => ({
   dialog: null,
   toast: null,
   busy: null,
-  panels: { navigator: true, color: true, layers: true, slices: true, history: true, info: true },
+  panels: { navigator: true, color: true, layers: true, slices: true, history: true, info: true, atlas: true, sprite: true, anims: true, atlasExport: true },
 }));
 
 useApp.subscribe((s, prev) => {

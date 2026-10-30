@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import * as A from './actions';
+import { addSpriteFiles, installAtlasSync, newAtlasFromFiles } from './atlasActions';
+import { isAtlas } from './core/atlasDoc';
 import { confirmDialog, isTauri, onFileDrop, setWindowTitle } from './core/platform';
 import { adjustSize, cycleTool, eventShortcut, findShortcut } from './menu';
 import { activeDoc, app, openDialog, useApp } from './store';
@@ -56,8 +58,9 @@ function EmptyState() {
         <button className="btn primary" onClick={() => openDialog({ kind: 'new' })}>Новый документ</button>
         <button className="btn" onClick={() => void A.openDocuments()}>Открыть…</button>
         <button className="btn" onClick={() => void A.paste()}>Вставить из буфера</button>
+        <button className="btn" onClick={() => void newAtlasFromFiles()}>Новый атлас из картинок…</button>
       </div>
-      <div className="hint">или перетащите файлы в окно — PNG, JPG, WebP, PSD, TIFF, TGA, GIF, BMP…</div>
+      <div className="hint">или перетащите файлы в окно — PNG, JPG, WebP, PSD, TIFF, TGA, GIF, BMP, проекты .pyard…</div>
     </div>
   );
 }
@@ -73,13 +76,21 @@ export function App() {
     void setWindowTitle(title);
   }, [title]);
 
+  useEffect(() => installAtlasSync(), []);
+
   useEffect(() => {
     window.addEventListener('keydown', handleKey);
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     void onFileDrop((files) => {
-      // в открытый документ файлы добавляются слоями, иначе открываются новыми документами
-      if (activeDoc()) void A.placeFiles(files);
+      // проекты открываются всегда; в атлас картинки добавляются спрайтами,
+      // в открытый документ — слоями, иначе открываются новыми документами
+      const projects = files.filter((f) => /\.pyard$/i.test(f.name));
+      if (projects.length) void A.openLoadedFiles(projects);
+      files = files.filter((f) => !/\.pyard$/i.test(f.name));
+      if (!files.length) return;
+      if (isAtlas(activeDoc())) void addSpriteFiles(files);
+      else if (activeDoc()) void A.placeFiles(files);
       else void A.openLoadedFiles(files);
     }).then((u) => {
       if (cancelled) u();

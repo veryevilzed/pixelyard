@@ -1,8 +1,11 @@
 import * as A from './actions';
 import * as P from './panes';
 import { FILTERS } from './core/filters';
-import { activeDoc, app, openDialog, setOpts, setPrefs, useApp, type ToolId } from './store';
+import { activeDoc, app, openDialog, setOpts, setPrefs, toast, useApp, type ToolId } from './store';
 import { changed } from './tools/base';
+import * as AT from './atlasActions';
+import { isAtlas, selectedSprites, updateAtlas } from './core/atlasDoc';
+import { detectAnimations } from './core/atlas';
 
 export interface MenuItem {
   label: string;
@@ -18,6 +21,18 @@ export interface Menu {
 }
 
 const hasDoc = () => !!activeDoc();
+/** Обычная картинка (не атлас): для пунктов, меняющих пиксели. */
+const img = () => {
+  const d = activeDoc();
+  return d && !isAtlas(d) ? d : null;
+};
+const hasImg = () => !!img();
+const atlas = () => {
+  const d = activeDoc();
+  return d && isAtlas(d) ? d : null;
+};
+const hasAtlas = () => !!atlas();
+const hasSprites = () => (atlas()?.atlasSel.length ?? 0) > 0;
 const ADJUST_KEYS: Record<string, string> = {
   levels: 'Mod+L',
   curves: 'Mod+M',
@@ -31,16 +46,16 @@ const ADJUST_KEYS: Record<string, string> = {
   'auto-contrast': 'Alt+Shift+Mod+L',
   'auto-color': 'Shift+Mod+B',
 };
-const hasSel = () => !!activeDoc()?.selection;
-const hasLayer = () => !!activeDoc()?.activeLayer;
-const multiLayers = () => (activeDoc()?.layers.length ?? 0) > 1;
+const hasSel = () => !!img()?.selection;
+const hasLayer = () => !!img()?.activeLayer;
+const multiLayers = () => (img()?.layers.length ?? 0) > 1;
 const canSplit = () => {
   const s = useApp.getState();
   return s.panes.length === 1 && (s.panes[0]?.docIds.length ?? 0) > 1;
 };
-const hasMask = () => !!activeDoc()?.activeLayer?.mask;
-const hasCuts = () => { const d = activeDoc(); return !!d && d.cuts.x.length + d.cuts.y.length > 0; };
-const hasSlices = () => (activeDoc()?.slices.length ?? 0) > 0;
+const hasMask = () => !!img()?.activeLayer?.mask;
+const hasCuts = () => { const d = img(); return !!d && d.cuts.x.length + d.cuts.y.length > 0; };
+const hasSlices = () => (img()?.slices.length ?? 0) > 0;
 const pref = (k: 'pixelGrid' | 'grid' | 'snap' | 'slices' | 'sliceLabels' | 'rulers' | 'guides' | 'lockGuides' | 'clampPan') => ({
   action: () => setPrefs({ [k]: !app().prefs[k] }),
   checked: () => app().prefs[k],
@@ -52,17 +67,17 @@ export const MENUS: Menu[] = [
     items: [
       { label: 'Новый…', shortcut: 'Mod+N', action: () => openDialog({ kind: 'new' }) },
       { label: 'Открыть…', shortcut: 'Mod+O', action: () => void A.openDocuments() },
-      { label: 'Поместить как слой…', shortcut: 'Shift+Mod+O', action: () => void A.placeFiles(), enabled: hasDoc },
+      { label: 'Поместить как слой…', shortcut: 'Shift+Mod+O', action: () => void A.placeFiles(), enabled: hasImg },
       'sep',
       { label: 'Сохранить', shortcut: 'Mod+S', action: () => void A.saveDoc(false), enabled: hasDoc },
       { label: 'Сохранить как…', shortcut: 'Shift+Mod+S', action: () => void A.saveDoc(true), enabled: hasDoc },
       'sep',
-      { label: 'Экспорт…', shortcut: 'Shift+Mod+E', action: () => openDialog({ kind: 'export' }), enabled: hasDoc },
-      { label: 'Экспорт слоёв по отдельности…', action: () => openDialog({ kind: 'export', source: 'layers' }), enabled: hasDoc },
+      { label: 'Экспорт…', shortcut: 'Shift+Mod+E', action: () => (hasAtlas() ? void AT.exportAtlasAction() : openDialog({ kind: 'export' })), enabled: hasDoc },
+      { label: 'Экспорт слоёв по отдельности…', action: () => openDialog({ kind: 'export', source: 'layers' }), enabled: hasImg },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },
       { label: 'Растровый шрифт (BMFont)…', shortcut: 'Alt+Mod+F', action: () => openDialog({ kind: 'bmfont' }) },
-      { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasDoc },
+      { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasImg },
       'sep',
       { label: 'Закрыть', shortcut: 'Mod+W', action: () => { const d = activeDoc(); if (d) void A.closeDoc(d.id); }, enabled: hasDoc },
     ],
@@ -75,7 +90,7 @@ export const MENUS: Menu[] = [
       'sep',
       { label: 'Вырезать', shortcut: 'Mod+X', action: A.cut, enabled: hasLayer },
       { label: 'Копировать', shortcut: 'Mod+C', action: () => A.copy(false), enabled: hasLayer },
-      { label: 'Копировать сведённое', shortcut: 'Shift+Mod+C', action: () => A.copy(true), enabled: hasDoc },
+      { label: 'Копировать сведённое', shortcut: 'Shift+Mod+C', action: () => A.copy(true), enabled: hasImg },
       { label: 'Вставить', shortcut: 'Mod+V', action: () => void A.paste() },
       { label: 'Вставить как новый документ', shortcut: 'Alt+Mod+V', action: A.pasteAsNewDoc },
       { label: 'Очистить', shortcut: 'Backspace', action: () => A.clearSelectionPixels(), enabled: hasLayer },
@@ -84,7 +99,7 @@ export const MENUS: Menu[] = [
       { label: 'Залить фоновым цветом', shortcut: 'Mod+Backspace', action: () => A.fillSelection('bg'), enabled: hasLayer },
       { label: 'Выполнить заливку (цвет, узор)…', shortcut: 'Shift+F5', action: () => openDialog({ kind: 'fill' }), enabled: hasLayer },
       { label: 'Обводка выделения 1px', action: () => A.strokeSelection(1), enabled: hasSel },
-      { label: 'Определить узор', action: A.definePatternAction, enabled: hasDoc },
+      { label: 'Определить узор', action: A.definePatternAction, enabled: hasImg },
       'sep',
       { label: 'Свободная трансформация', shortcut: 'Mod+T', action: () => A.freeTransform('free'), enabled: hasLayer },
       {
@@ -116,23 +131,23 @@ export const MENUS: Menu[] = [
       },
       ...FILTERS.filter((f) => f.group === 'auto').map((f) => ({ label: f.label, action: () => A.runFilter(f.id), enabled: hasLayer, shortcut: ADJUST_KEYS[f.id] })),
       'sep',
-      { label: 'Размер изображения…', shortcut: 'Alt+Mod+I', action: () => openDialog({ kind: 'image-size' }), enabled: hasDoc },
-      { label: 'Размер холста…', shortcut: 'Alt+Mod+C', action: () => openDialog({ kind: 'canvas-size' }), enabled: hasDoc },
+      { label: 'Размер изображения…', shortcut: 'Alt+Mod+I', action: () => openDialog({ kind: 'image-size' }), enabled: hasImg },
+      { label: 'Размер холста…', shortcut: 'Alt+Mod+C', action: () => openDialog({ kind: 'canvas-size' }), enabled: hasImg },
       'sep',
-      { label: 'Повернуть на 90° по часовой', action: () => A.rotateCanvas(90), enabled: hasDoc },
-      { label: 'Повернуть на 90° против часовой', action: () => A.rotateCanvas(-90), enabled: hasDoc },
-      { label: 'Повернуть на 180°', action: () => A.rotateCanvas(180), enabled: hasDoc },
-      { label: 'Отразить холст по горизонтали', action: () => A.flipCanvas('h'), enabled: hasDoc },
-      { label: 'Отразить холст по вертикали', action: () => A.flipCanvas('v'), enabled: hasDoc },
+      { label: 'Повернуть на 90° по часовой', action: () => A.rotateCanvas(90), enabled: hasImg },
+      { label: 'Повернуть на 90° против часовой', action: () => A.rotateCanvas(-90), enabled: hasImg },
+      { label: 'Повернуть на 180°', action: () => A.rotateCanvas(180), enabled: hasImg },
+      { label: 'Отразить холст по горизонтали', action: () => A.flipCanvas('h'), enabled: hasImg },
+      { label: 'Отразить холст по вертикали', action: () => A.flipCanvas('v'), enabled: hasImg },
       'sep',
       { label: 'Кадрировать по выделению', action: A.cropToSelection, enabled: hasSel },
-      { label: 'Тримминг (обрезать прозрачное)', action: A.trimTransparent, enabled: hasDoc },
+      { label: 'Тримминг (обрезать прозрачное)', action: A.trimTransparent, enabled: hasImg },
     ],
   },
   {
     label: 'Слои',
     items: [
-      { label: 'Новый слой', shortcut: 'Shift+Mod+N', action: A.newLayer, enabled: hasDoc },
+      { label: 'Новый слой', shortcut: 'Shift+Mod+N', action: A.newLayer, enabled: hasImg },
       { label: 'Дублировать слой', action: A.duplicateLayer, enabled: hasLayer },
       { label: 'Удалить слой', action: A.deleteLayer, enabled: multiLayers },
       'sep',
@@ -190,10 +205,10 @@ export const MENUS: Menu[] = [
     label: 'Выделение',
     items: [
       { label: 'Всё', shortcut: 'Mod+A', action: A.selectAllAction, enabled: hasDoc },
-      { label: 'Снять выделение', shortcut: 'Mod+D', action: A.deselect, enabled: hasSel },
+      { label: 'Снять выделение', shortcut: 'Mod+D', action: A.deselect, enabled: () => hasSel() || hasSprites() },
       { label: 'Инверсия', shortcut: 'Shift+Mod+I', action: A.invertSel, enabled: hasSel },
       { label: 'Непрозрачные пиксели слоя', action: A.selectLayerAlpha, enabled: hasLayer },
-      { label: 'Цветовой диапазон (по цвету)…', shortcut: 'Alt+Mod+O', action: () => openDialog({ kind: 'color-range' }), enabled: hasDoc },
+      { label: 'Цветовой диапазон (по цвету)…', shortcut: 'Alt+Mod+O', action: () => openDialog({ kind: 'color-range' }), enabled: hasImg },
       'sep',
       { label: 'Выделенное в новый документ', shortcut: 'Alt+Mod+N', action: () => A.selectionToNewDoc(false), enabled: hasSel },
       { label: 'Выделенное (все слои) в новый документ', shortcut: 'Alt+Shift+Mod+N', action: () => A.selectionToNewDoc(true), enabled: hasSel },
@@ -212,18 +227,18 @@ export const MENUS: Menu[] = [
   {
     label: 'Нарезка',
     items: [
-      { label: 'Нарезать сеткой…', action: () => openDialog({ kind: 'grid-slice' }), enabled: hasDoc },
-      { label: 'Авто-нарезка по прозрачности…', action: () => openDialog({ kind: 'auto-slice' }), enabled: hasDoc },
+      { label: 'Нарезать сеткой…', action: () => openDialog({ kind: 'grid-slice' }), enabled: hasImg },
+      { label: 'Авто-нарезка по прозрачности…', action: () => openDialog({ kind: 'auto-slice' }), enabled: hasImg },
       'sep',
-      { label: 'Нож: резы с шагом…', action: () => openDialog({ kind: 'cut-step' }), enabled: hasDoc },
-      { label: 'Нож: резы по направляющим', action: A.guidesToCuts, enabled: hasDoc },
+      { label: 'Нож: резы с шагом…', action: () => openDialog({ kind: 'cut-step' }), enabled: hasImg },
+      { label: 'Нож: резы по направляющим', action: A.guidesToCuts, enabled: hasImg },
       { label: 'Нож: куски в слайсы', action: A.cutsToSlices, enabled: hasCuts },
       { label: 'Нож: куски в слои', action: A.cutsToLayers, enabled: hasCuts },
       { label: 'Нож: экспорт кусков в файлы…', action: A.exportPieces, enabled: hasCuts },
       { label: 'Нож: очистить резы', action: A.clearCuts, enabled: hasCuts },
       'sep',
       { label: 'Слайс из выделения', action: A.sliceFromSelection, enabled: hasSel },
-      { label: 'Слайсы по слоям', action: A.slicesFromLayers, enabled: hasDoc },
+      { label: 'Слайсы по слоям', action: A.slicesFromLayers, enabled: hasImg },
       { label: 'Выделить область слайса', action: A.selectSliceArea, enabled: () => !!activeDoc()?.activeSliceId },
       { label: 'Слайсы → слои', action: A.slicesToLayers, enabled: hasSlices },
       'sep',
@@ -231,6 +246,47 @@ export const MENUS: Menu[] = [
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Упаковать слайсы в спрайтшит…', action: () => openDialog({ kind: 'spritesheet', source: 'slices' }), enabled: hasSlices },
       { label: 'Растровый шрифт (BMFont)…', action: () => openDialog({ kind: 'bmfont' }) },
+    ],
+  },
+  {
+    label: 'Атлас',
+    items: [
+      { label: 'Новый атлас', action: () => AT.newAtlasAction() },
+      { label: 'Новый атлас из картинок…', action: () => void AT.newAtlasFromFiles() },
+      { label: 'Новый атлас из слоёв документа', action: () => { const d = img(); if (d) AT.spritesFromDocAction(d, 'layers', null); }, enabled: hasImg },
+      { label: 'Новый атлас из слайсов документа', action: () => { const d = img(); if (d) AT.spritesFromDocAction(d, 'slices', null); }, enabled: hasSlices },
+      'sep',
+      { label: 'Добавить картинки…', shortcut: 'Alt+Mod+A', action: () => void AT.addSpriteFiles(), enabled: hasAtlas },
+      { label: 'Править спрайт', action: () => { const d = atlas(); if (d && d.atlasSel[0]) void AT.editSpriteAction(d, d.atlasSel[0]); }, enabled: () => atlas()?.atlasSel.length === 1 },
+      { label: 'Удалить выбранные спрайты', action: () => { const d = atlas(); if (d) AT.removeSpritesAction(d, d.atlasSel); }, enabled: hasSprites },
+      'sep',
+      {
+        label: 'Найти анимации по номерам в именах',
+        action: () => {
+          const d = atlas();
+          if (!d) return;
+          const found = detectAnimations(d.atlas);
+          if (!found.length) return void toast('Новых анимаций не найдено (нужны имена вида run_0, run_1…)');
+          updateAtlas(d, 'Найти анимации', (a) => ({ ...a, animations: [...a.animations, ...found] }));
+          toast(`Найдено анимаций: ${found.length}`);
+          changed();
+        },
+        enabled: hasAtlas,
+      },
+      {
+        label: 'Анимация из выбранных',
+        action: () => {
+          const d = atlas();
+          if (!d) return;
+          const ids = selectedSprites(d).map((s) => s.id);
+          updateAtlas(d, 'Новая анимация', (a) => ({ ...a, animations: [...a.animations, { id: `an_${Date.now().toString(36)}`, name: `anim_${a.animations.length + 1}`, fps: 12, mode: 'loop', frames: ids }] }));
+          changed();
+        },
+        enabled: () => (atlas()?.atlasSel.length ?? 0) > 1,
+      },
+      'sep',
+      { label: 'Выгрузить атлас…', action: () => void AT.exportAtlasAction(), enabled: hasAtlas },
+      { label: 'Сохранить проект (.pyard)', action: () => void A.saveDoc(false), enabled: hasAtlas },
     ],
   },
   {

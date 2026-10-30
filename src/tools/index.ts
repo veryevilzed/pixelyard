@@ -8,6 +8,9 @@ import { brushTool, eraserTool, pencilTool } from './paint';
 import { lassoTool, marqueeEllipseTool, marqueeRectTool, polygonLassoTool, wandTool } from './select';
 import { sliceTool } from './slice';
 import { knifeTool } from './knife';
+import { atlasTool } from './atlasTool';
+import { isAtlas } from '../core/atlasDoc';
+import { activeDoc } from '../store';
 
 export const TOOLS: Record<ToolId, Tool> = {
   move: moveTool,
@@ -31,7 +34,9 @@ export const TOOLS: Record<ToolId, Tool> = {
   zoom: zoomTool,
 };
 
-/** Инструмент, получающий события: трансформация перекрывает выбранный. */
+/** Инструмент, получающий события: трансформация перекрывает выбранный, в атласе — инструмент атласа. */
 export function effectiveTool(id: ToolId): Tool {
-  return transformActive() ? transformTool : TOOLS[id];
+  if (transformActive()) return transformTool;
+  if (isAtlas(activeDoc()) && id !== 'hand' && id !== 'zoom') return atlasTool;
+  return TOOLS[id];
 }

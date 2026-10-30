@@ -17,6 +17,9 @@ export interface AtlasMeta {
   height: number;
   scale: number;
   app: string;
+  /** Номер страницы и их число (многостраничный атлас). */
+  page?: number;
+  pageCount?: number;
 }
 
 export interface FormatDef {
@@ -28,6 +31,12 @@ export interface FormatDef {
   render(data: TemplateData): string;
   /** Шаблон, если формат задан пользователем (или для «взять за основу»). */
   template?: string;
+  /** Направление поворота повёрнутых кадров; false — формат вращение не поддерживает. По умолчанию cw. */
+  rotation?: 'cw' | 'ccw' | false;
+  /** Один файл описания на страницу (по умолчанию) или один на весь атлас (data.pages). */
+  multi?: 'per-page' | 'single';
+  /** Дополнительные файлы (например, анимации): имя → текст. base — имя без расширения. */
+  extraFiles?(data: TemplateData, base: string): Record<string, string>;
 }
 
 export type TemplateValue = string | number | boolean | TemplateData[] | undefined;
@@ -60,35 +69,110 @@ const jsonStr = (s: string) => JSON.stringify(s);
 
 // ---------- данные кадров ----------
 
+/**
+ * Данные кадров одной страницы для шаблона. Атласные свойства спрайта приходят в `extra`:
+ * pivotX/pivotY (0..1), nineL/nineT/nineR/nineB (9-slice, в пикселях исходного кадра).
+ */
 export function spriteTemplateData(frames: PackedFrame[], meta: AtlasMeta): TemplateData {
+  const list = frames.filter((f) => f.w > 0 || f.srcW > 0);
   return {
     ...meta,
-    count: frames.length,
-    frames: frames.map((f) => ({
-      name: f.name,
-      nameXml: xmlEsc(f.name),
-      nameJson: jsonStr(f.name),
-      x: f.x,
-      y: f.y,
-      w: f.w,
-      h: f.h,
-      offX: f.offX,
-      offY: f.offY,
-      // смещение от центра (Cocos)
-      offCX: f.offX + f.w / 2 - f.srcW / 2,
-      offCY: f.srcH / 2 - (f.offY + f.h / 2),
-      srcW: f.srcW,
-      srcH: f.srcH,
-      trimmed: f.trimmed,
-      ...(f.extra ?? {}),
-    })),
+    page: meta.page ?? 0,
+    pageCount: meta.pageCount ?? 1,
+    count: list.length,
+    frames: list.map((f) => {
+      const e = f.extra ?? {};
+      const nine = ['nineL', 'nineT', 'nineR', 'nineB'].some((k) => Number(e[k]) > 0);
+      return {
+        name: f.name,
+        nameXml: xmlEsc(f.name),
+        nameJson: jsonStr(f.name),
+        x: f.x,
+        y: f.y,
+        w: f.w,
+        h: f.h,
+        // размер так, как кадр лежит в атласе (с учётом поворота)
+        atlasW: f.rotated ? f.h : f.w,
+        atlasH: f.rotated ? f.w : f.h,
+        offX: f.offX,
+        offY: f.offY,
+        // смещение от центра (Cocos)
+        offCX: f.offX + f.w / 2 - f.srcW / 2,
+        offCY: f.srcH / 2 - (f.offY + f.h / 2),
+        srcW: f.srcW,
+        srcH: f.srcH,
+        trimmed: f.trimmed,
+        rotated: !!f.rotated,
+        page: f.page ?? 0,
+        pivotX: 0.5,
+        pivotY: 0.5,
+        nineL: 0,
+        nineT: 0,
+        nineR: 0,
+        nineB: 0,
+        ...e,
+        nine,
+      };
+    }),
   };
+}
+
+export interface AtlasPageInfo {
+  image: string;
+  width: number;
+  height: number;
+  frames: PackedFrame[];
+}
+
+/** Данные для формата: поля первой страницы + `pages` (для однофайловых форматов). */
+export function atlasTemplateData(pages: AtlasPageInfo[], scale: number, extra: TemplateData = {}): TemplateData[] {
+  const per = pages.map((p, i) => ({ ...spriteTemplateData(p.frames, { image: p.image, width: p.width, height: p.height, scale, app: 'PixelYard', page: i, pageCount: pages.length }), ...extra }));
+  const related = pages.map((p) => p.image);
+  return per.map((d) => ({ ...d, pages: per, related: related.filter((r) => r !== d.image).join(',') }));
+}
+
+/** Имя страницы: одна — без номера, иначе name-0, name-1… */
+export const pageBase = (base: string, i: number, count: number) => (count > 1 ? `${base}-${i}` : base);
+
+/** Файлы описания атласа в выбранном формате: имя → текст. */
+export function describeAtlas(format: FormatDef, pages: AtlasPageInfo[], base: string, scale: number, extra: TemplateData = {}): Record<string, string> {
+  const data = atlasTemplateData(pages, scale, extra);
+  const out: Record<string, string> = {};
+  if (format.multi === 'single') out[`${base}.${format.ext}`] = format.render(data[0]);
+  else data.forEach((d, i) => (out[`${pageBase(base, i, data.length)}.${format.ext}`] = format.render(d)));
+  if (format.extraFiles) Object.assign(out, format.extraFiles(data[0], base));
+  return out;
 }
 
 // ---------- встроенные форматы спрайтов ----------
 
-type Frame = TemplateData & { name: string; x: number; y: number; w: number; h: number; offX: number; offY: number; srcW: number; srcH: number; trimmed: boolean };
+type Frame = TemplateData & {
+  name: string; x: number; y: number; w: number; h: number; atlasW: number; atlasH: number;
+  offX: number; offY: number; srcW: number; srcH: number; trimmed: boolean; rotated: boolean; page: number;
+  pivotX: number; pivotY: number; nine: boolean; nineL: number; nineT: number; nineR: number; nineB: number;
+};
 const framesOf = (d: TemplateData) => d.frames as Frame[];
+const pagesOf = (d: TemplateData) => (d.pages as TemplateData[] | undefined) ?? [d];
+
+/** Кадр в стиле TexturePacker JSON (Pixi, Phaser): размеры без поворота, поворот по часовой. */
+const tpFrame = (f: Frame) => ({
+  frame: { x: f.x, y: f.y, w: f.w, h: f.h },
+  rotated: f.rotated,
+  trimmed: f.trimmed,
+  spriteSourceSize: { x: f.offX, y: f.offY, w: f.w, h: f.h },
+  sourceSize: { w: f.srcW, h: f.srcH },
+  pivot: { x: f.pivotX, y: f.pivotY },
+  ...(f.nine ? { scale9Borders: { x: f.nineL, y: f.nineT, w: f.srcW - f.nineL - f.nineR, h: f.srcH - f.nineT - f.nineB } } : {}),
+});
+const tpMeta = (d: TemplateData) => ({
+  app: d.app,
+  version: '1.0',
+  image: d.image,
+  format: 'RGBA8888',
+  size: { w: d.width, h: d.height },
+  scale: String(d.scale),
+  ...(Number(d.pageCount) > 1 ? { related_multi_packs: String(d.related).split(',').map((r) => r.replace(/\.\w+$/, '.json')) } : {}),
+});
 
 export const SPRITE_FORMATS: FormatDef[] = [
   {
@@ -96,68 +180,34 @@ export const SPRITE_FORMATS: FormatDef[] = [
     label: 'JSON Hash (TexturePacker, Pixi, Phaser 2)',
     ext: 'json',
     kind: 'sprites',
-    render: (d) =>
-      JSON.stringify(
-        {
-          frames: Object.fromEntries(
-            framesOf(d).map((f) => [f.name, {
-              frame: { x: f.x, y: f.y, w: f.w, h: f.h },
-              rotated: false,
-              trimmed: f.trimmed,
-              spriteSourceSize: { x: f.offX, y: f.offY, w: f.w, h: f.h },
-              sourceSize: { w: f.srcW, h: f.srcH },
-            }]),
-          ),
-          meta: { app: d.app, version: '1.0', image: d.image, format: 'RGBA8888', size: { w: d.width, h: d.height }, scale: String(d.scale) },
-        },
-        null,
-        2,
-      ),
+    rotation: 'cw',
+    render: (d) => JSON.stringify({ frames: Object.fromEntries(framesOf(d).map((f) => [f.name, tpFrame(f)])), meta: tpMeta(d) }, null, 2),
   },
   {
     id: 'tp-array',
     label: 'JSON Array (TexturePacker)',
     ext: 'json',
     kind: 'sprites',
-    render: (d) =>
-      JSON.stringify(
-        {
-          frames: framesOf(d).map((f) => ({
-            filename: f.name,
-            frame: { x: f.x, y: f.y, w: f.w, h: f.h },
-            rotated: false,
-            trimmed: f.trimmed,
-            spriteSourceSize: { x: f.offX, y: f.offY, w: f.w, h: f.h },
-            sourceSize: { w: f.srcW, h: f.srcH },
-          })),
-          meta: { app: d.app, version: '1.0', image: d.image, format: 'RGBA8888', size: { w: d.width, h: d.height }, scale: String(d.scale) },
-        },
-        null,
-        2,
-      ),
+    rotation: 'cw',
+    render: (d) => JSON.stringify({ frames: framesOf(d).map((f) => ({ filename: f.name, ...tpFrame(f) })), meta: tpMeta(d) }, null, 2),
   },
   {
     id: 'phaser3',
     label: 'Phaser 3 (multiatlas JSON)',
     ext: 'json',
     kind: 'sprites',
+    rotation: 'cw',
+    multi: 'single',
     render: (d) =>
       JSON.stringify(
         {
-          textures: [{
-            image: d.image,
+          textures: pagesOf(d).map((p) => ({
+            image: p.image,
             format: 'RGBA8888',
-            size: { w: d.width, h: d.height },
-            scale: d.scale,
-            frames: framesOf(d).map((f) => ({
-              filename: f.name,
-              rotated: false,
-              trimmed: f.trimmed,
-              sourceSize: { w: f.srcW, h: f.srcH },
-              spriteSourceSize: { x: f.offX, y: f.offY, w: f.w, h: f.h },
-              frame: { x: f.x, y: f.y, w: f.w, h: f.h },
-            })),
-          }],
+            size: { w: p.width, h: p.height },
+            scale: p.scale,
+            frames: framesOf(p).map((f) => ({ filename: f.name, ...tpFrame(f) })),
+          })),
           meta: { app: d.app, version: '3.0' },
         },
         null,
@@ -169,39 +219,49 @@ export const SPRITE_FORMATS: FormatDef[] = [
     label: 'Spine / libGDX (.atlas)',
     ext: 'atlas',
     kind: 'sprites',
+    // libGDX: rotate: true — регион повёрнут на 90° против часовой, size — без поворота
+    rotation: 'ccw',
+    multi: 'single',
     render: (d) =>
-      [
-        '',
-        d.image,
-        `size: ${d.width},${d.height}`,
-        'format: RGBA8888',
-        'filter: Linear,Linear',
-        'repeat: none',
-        ...framesOf(d).flatMap((f) => [
-          f.name,
-          '  rotate: false',
-          `  xy: ${f.x}, ${f.y}`,
-          `  size: ${f.w}, ${f.h}`,
-          `  orig: ${f.srcW}, ${f.srcH}`,
-          // libGDX считает смещение от нижнего края
-          `  offset: ${f.offX}, ${f.srcH - f.offY - f.h}`,
-          '  index: -1',
-        ]),
-        '',
-      ].join('\n'),
+      pagesOf(d)
+        .flatMap((p) => [
+          '',
+          String(p.image),
+          `size: ${p.width},${p.height}`,
+          'format: RGBA8888',
+          'filter: Linear,Linear',
+          'repeat: none',
+          ...framesOf(p).flatMap((f) => [
+            f.name,
+            `  rotate: ${f.rotated}`,
+            `  xy: ${f.x}, ${f.y}`,
+            `  size: ${f.w}, ${f.h}`,
+            ...(f.nine ? [`  split: ${f.nineL}, ${f.nineR}, ${f.nineT}, ${f.nineB}`] : []),
+            `  orig: ${f.srcW}, ${f.srcH}`,
+            // libGDX считает смещение от нижнего края
+            `  offset: ${f.offX}, ${f.srcH - f.offY - f.h}`,
+            `  index: ${f.index ?? -1}`,
+          ]),
+        ])
+        .concat([''])
+        .join('\n'),
   },
   {
     id: 'starling',
     label: 'Starling / Sparrow XML',
     ext: 'xml',
     kind: 'sprites',
+    rotation: 'cw',
     render: (d) =>
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
         `<TextureAtlas imagePath="${xmlEsc(String(d.image))}" width="${d.width}" height="${d.height}">`,
         ...framesOf(d).map((f) =>
-          `  <SubTexture name="${xmlEsc(f.name)}" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}"` +
+          // Starling: width/height — как регион лежит в атласе
+          `  <SubTexture name="${xmlEsc(f.name)}" x="${f.x}" y="${f.y}" width="${f.atlasW}" height="${f.atlasH}"` +
+          (f.rotated ? ' rotated="true"' : '') +
           (f.trimmed ? ` frameX="${-f.offX}" frameY="${-f.offY}" frameWidth="${f.srcW}" frameHeight="${f.srcH}"` : '') +
+          (f.pivotX !== 0.5 || f.pivotY !== 0.5 ? ` pivotX="${f.pivotX * f.srcW}" pivotY="${f.pivotY * f.srcH}"` : '') +
           '/>',
         ),
         '</TextureAtlas>',
@@ -213,6 +273,7 @@ export const SPRITE_FORMATS: FormatDef[] = [
     label: 'Cocos2d (.plist, формат 2)',
     ext: 'plist',
     kind: 'sprites',
+    rotation: 'cw',
     render: (d) => {
       const fr = framesOf(d).map((f) => {
         const ox = f.offX + f.w / 2 - f.srcW / 2, oy = f.srcH / 2 - (f.offY + f.h / 2);
@@ -220,7 +281,7 @@ export const SPRITE_FORMATS: FormatDef[] = [
         <dict>
             <key>frame</key><string>{{${f.x},${f.y}},{${f.w},${f.h}}}</string>
             <key>offset</key><string>{${ox},${oy}}</string>
-            <key>rotated</key><false/>
+            <key>rotated</key>${f.rotated ? '<true/>' : '<false/>'}
             <key>sourceColorRect</key><string>{{${f.offX},${f.offY}},{${f.w},${f.h}}}</string>
             <key>sourceSize</key><string>{${f.srcW},${f.srcH}}</string>
         </dict>`;
@@ -250,6 +311,7 @@ ${fr.join('\n')}
     label: 'CSS-спрайты',
     ext: 'css',
     kind: 'sprites',
+    rotation: false,
     template: `.sprite {
   display: inline-block;
   background-image: url("{{image}}");
@@ -271,8 +333,9 @@ ${fr.join('\n')}
     label: 'CSV (name,x,y,w,h,…)',
     ext: 'csv',
     kind: 'sprites',
-    template: `name,x,y,w,h,offsetX,offsetY,sourceW,sourceH
-{{#frames}}{{name}},{{x}},{{y}},{{w}},{{h}},{{offX}},{{offY}},{{srcW}},{{srcH}}
+    rotation: 'cw',
+    template: `name,page,x,y,w,h,rotated,offsetX,offsetY,sourceW,sourceH,pivotX,pivotY
+{{#frames}}{{name}},{{page}},{{x}},{{y}},{{w}},{{h}},{{rotated}},{{offX}},{{offY}},{{srcW}},{{srcH}},{{pivotX}},{{pivotY}}
 {{/frames}}`,
     render(d) {
       return renderTemplate(this.template!, d);
@@ -296,7 +359,12 @@ export const SPRITE_VARS: [string, string][] = [
   ['{{count}}', 'число кадров'],
   ['{{#frames}}…{{/frames}}', 'повтор для каждого кадра'],
   ['{{name}}', 'имя кадра ({{nameJson}} — в кавычках, {{nameXml}} — для XML)'],
-  ['{{x}} {{y}} {{w}} {{h}}', 'положение в атласе'],
+  ['{{x}} {{y}} {{w}} {{h}}', 'положение в атласе (w/h без поворота)'],
+  ['{{atlasW}} {{atlasH}}', 'размер в атласе с учётом поворота'],
+  ['{{#rotated}}…{{/rotated}}', 'кадр повёрнут на 90° по часовой'],
+  ['{{page}} {{pageCount}}', 'номер страницы и их число'],
+  ['{{pivotX}} {{pivotY}}', 'опорная точка 0..1'],
+  ['{{#nine}}…{{/nine}}', '9-slice: {{nineL}} {{nineT}} {{nineR}} {{nineB}}'],
   ['{{offX}} {{offY}}', 'смещение обрезанной части в исходном кадре'],
   ['{{srcW}} {{srcH}}', 'исходный размер кадра'],
   ['{{index}}', 'номер кадра с 0'],

@@ -1,4 +1,4 @@
-import { Columns2, Combine, Rows2, X } from 'lucide-react';
+import { Columns2, Combine, LayoutGrid, Link2, Rows2, X } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 import { create } from 'zustand';
 import { closeDoc, switchDoc } from '../actions';
@@ -127,7 +127,7 @@ function TabBar({ pane, focused, split }: { pane: Pane; focused: boolean; split:
             key={d.id}
             data-tab={d.id}
             className={`tab ${d.id === pane.activeId ? 'active' : ''} ${dragId === d.id ? 'dragging' : ''}`}
-            title={`${d.path ?? d.name}\nПеретащите к краю холста, чтобы разделить экран`}
+            title={`${d.path ?? d.name}${d.link ? '\nСпрайт атласа: правки сразу видны в атласе' : ''}\nПеретащите к краю холста, чтобы разделить экран`}
             onPointerDown={(e) => {
               if (e.button === 1) return;
               if (d.id !== useApp.getState().activeId) switchDoc(d.id);
@@ -136,6 +136,8 @@ function TabBar({ pane, focused, split }: { pane: Pane; focused: boolean; split:
             onAuxClick={(e) => e.button === 1 && void closeDoc(d.id)}
           >
             <span className="name">
+              {d.kind === 'atlas' && <LayoutGrid size={11} style={{ marginRight: 4, verticalAlign: -1 }} />}
+              {d.link && <Link2 size={11} style={{ marginRight: 4, verticalAlign: -1 }} />}
               {d.name}
               {d.dirty ? ' •' : ''}
             </span>

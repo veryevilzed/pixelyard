@@ -1,13 +1,15 @@
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useApp } from '../store';
+import { activeDoc, useApp } from '../store';
+import { isAtlas } from '../core/atlasDoc';
+import { AnimationsActions, AnimationsPanel, AtlasActions, AtlasExportPanel, AtlasPanel, SpritePanel } from './panels/AtlasPanel';
 import { ColorPanel } from './panels/ColorPanel';
 import { Navigator } from './panels/Navigator';
 import { HistoryPanel } from './panels/HistoryPanel';
 import { LayersActions, LayersPanel } from './panels/LayersPanel';
 import { SlicesActions, SlicesPanel } from './panels/SlicesPanel';
 
-type PanelKey = 'navigator' | 'color' | 'layers' | 'slices' | 'history';
+type PanelKey = 'navigator' | 'color' | 'layers' | 'slices' | 'history' | 'atlas' | 'sprite' | 'anims' | 'atlasExport';
 
 function Panel({ id, title, actions, grow, children }: { id: PanelKey; title: string; actions?: ReactNode; grow?: boolean; children: ReactNode }) {
   const open = useApp((s) => s.panels[id]);
@@ -29,6 +31,31 @@ function Panel({ id, title, actions, grow, children }: { id: PanelKey; title: st
 }
 
 export function Sidebar() {
+  useApp((s) => s.tick);
+  // атлас: свои панели вместо цвета, слоёв и слайсов
+  if (isAtlas(activeDoc()))
+    return (
+      <div className="sidebar atlas-side">
+        <Panel id="navigator" title="Навигатор">
+          <Navigator />
+        </Panel>
+        <Panel id="atlas" title="Спрайты" actions={<AtlasActions />} grow>
+          <AtlasPanel />
+        </Panel>
+        <Panel id="sprite" title="Свойства спрайта">
+          <SpritePanel />
+        </Panel>
+        <Panel id="anims" title="Анимации" actions={<AnimationsActions />}>
+          <AnimationsPanel />
+        </Panel>
+        <Panel id="atlasExport" title="Выгрузка">
+          <AtlasExportPanel />
+        </Panel>
+        <Panel id="history" title="История">
+          <HistoryPanel />
+        </Panel>
+      </div>
+    );
   return (
     <div className="sidebar">
       <Panel id="navigator" title="Навигатор">

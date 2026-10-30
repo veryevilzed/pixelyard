@@ -1,5 +1,7 @@
 import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid } from './canvas';
 import { blendToComposite, compositeLayers, grayToMaskData, maskToGray } from './composite';
+import type { AtlasState } from './atlas';
+import type { PackResult } from './pack';
 import { DEFAULT_EFFECTS, type Cuts, type Layer, type Rect, type Selection, type Slice } from './types';
 
 /** Снимок «структуры» документа: ссылки на неизменяемые объекты. */
@@ -12,6 +14,7 @@ interface Snapshot {
   guides: Cuts;
   selection: Selection | null;
   activeLayerId: string | null;
+  atlas: AtlasState | null;
 }
 
 interface PixelPatch {
@@ -73,6 +76,21 @@ export class Doc {
   activeSliceId: string | null = null;
   /** Инструменты рисуют в маску активного слоя, а не в его пиксели. */
   editMask = false;
+
+  /** Обычная картинка или проект атласа (см. core/atlasDoc.ts). */
+  kind: 'image' | 'atlas' = 'image';
+  /** Состояние атласа — в истории; слой «Атлас» с текущей страницей пересобирается из него. */
+  atlas: AtlasState | null = null;
+  atlasPage = 0;
+  /** Выделенные спрайты (id) — вне истории. */
+  atlasSel: string[] = [];
+  atlasPack: PackResult | null = null;
+  atlasError: string | null = null;
+  /** Для какого состояния собран atlasPack и какой слой показан. */
+  atlasBuiltFor: AtlasState | null = null;
+  atlasLayer: Layer | null = null;
+  /** Картинка открыта для правки спрайта атласа: изменения уходят в атлас. */
+  link: { atlasDocId: string; spriteId: string } | null = null;
 
   undoStack: HistoryEntry[] = [];
   redoStack: HistoryEntry[] = [];
@@ -166,6 +184,7 @@ export class Doc {
       guides: this.guides,
       selection: this.selection,
       activeLayerId: this.activeLayerId,
+      atlas: this.atlas,
     };
   }
 
@@ -178,6 +197,7 @@ export class Doc {
     this.guides = s.guides;
     this.selection = s.selection;
     this.activeLayerId = s.activeLayerId;
+    this.atlas = s.atlas;
     if (this.activeSliceId && !this.slices.some((sl) => sl.id === this.activeSliceId)) this.activeSliceId = null;
   }
 
@@ -289,6 +309,25 @@ export class Doc {
   jumpTo(index: number) {
     while (this.undoStack.length - 1 > index && this.undo());
     while (this.undoStack.length - 1 < index && this.redo());
+  }
+
+  /**
+   * Замена состояния атласа без записи в историю — во всех снимках тоже (правка картинки
+   * спрайта в связанной вкладке не должна откатываться отменой настроек атласа).
+   */
+  patchAtlasEverywhere(fn: (a: AtlasState) => AtlasState) {
+    const memo = new Map<AtlasState, AtlasState>();
+    const map = (a: AtlasState | null) => {
+      if (!a) return a;
+      if (!memo.has(a)) memo.set(a, fn(a));
+      return memo.get(a)!;
+    };
+    this.atlas = map(this.atlas);
+    for (const e of [...this.undoStack, ...this.redoStack]) {
+      if (e.before) e.before = { ...e.before, atlas: map(e.before.atlas) };
+      if (e.after) e.after = { ...e.after, atlas: map(e.after.atlas) };
+    }
+    this.rev++;
   }
 
   // ---------- операции со слоями ----------

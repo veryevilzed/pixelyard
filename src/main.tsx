@@ -12,8 +12,12 @@ if (import.meta.env.DEV) {
     import('./core/types'),
     import('./tools/base'),
     import('./tools/transform'),
-  ]).then(([store, actions, canvas, types, base, transform]) => {
-    (window as unknown as { __pe: unknown }).__pe = { store, actions, canvas, types, base, transform };
+    import('./atlasActions'),
+    import('./core/atlas'),
+    import('./core/atlasDoc'),
+    import('./core/pack'),
+  ]).then(([store, actions, canvas, types, base, transform, atlasActions, atlas, atlasDoc, pack]) => {
+    (window as unknown as { __pe: unknown }).__pe = { store, actions, canvas, types, base, transform, atlasActions, atlas, atlasDoc, pack };
   });
 }
 

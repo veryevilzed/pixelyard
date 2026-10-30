@@ -2,6 +2,8 @@ import { readPsd, writePsdUint8Array, type Color as PsdColor, type Layer as PsdL
 import * as UTIF from 'utif2';
 import { alphaBounds, canvasToBlob, createCanvas, cropCanvas, ctx2d } from './canvas';
 import { Doc } from './doc';
+import { decodeProject } from './atlas';
+import { newAtlasDoc } from './atlasDoc';
 import { isTauri, type FileFilter, type LoadedFile } from './platform';
 import { grayToMask, maskToGray } from './composite';
 import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffects, type RGBA } from './types';
@@ -9,8 +11,9 @@ import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffe
 export const OPEN_FILTERS: FileFilter[] = [
   {
     name: 'Изображения',
-    extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'svg', 'heic', 'avif'],
+    extensions: ['pyard', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'svg', 'heic', 'avif'],
   },
+  { name: 'Проект PixelYard', extensions: ['pyard'] },
   { name: 'Photoshop', extensions: ['psd', 'psb'] },
   { name: 'TIFF', extensions: ['tif', 'tiff'] },
 ];
@@ -40,7 +43,10 @@ const BLEND_TO_PSD = Object.fromEntries(Object.entries(PSD_TO_BLEND).map(([k, v]
 export async function decodeFile(file: LoadedFile): Promise<Doc> {
   const e = ext(file.name);
   let doc: Doc;
-  if (e === 'psd' || e === 'psb') doc = decodePsd(file);
+  if (e === 'pyard') {
+    const { state } = await decodeProject(file.data);
+    doc = newAtlasDoc(file.name, state);
+  } else if (e === 'psd' || e === 'psb') doc = decodePsd(file);
   else if (e === 'tif' || e === 'tiff') doc = decodeTiff(file);
   else if (e === 'tga') doc = singleLayerDoc(file.name, decodeTga(file.data));
   else doc = singleLayerDoc(file.name, await decodeBrowserImage(file.data, e));
@@ -65,7 +71,7 @@ function singleLayerDoc(name: string, canvas: HTMLCanvasElement): Doc {
   return doc;
 }
 
-async function decodeBrowserImage(data: Uint8Array, e: string): Promise<HTMLCanvasElement> {
+export async function decodeBrowserImage(data: Uint8Array, e: string): Promise<HTMLCanvasElement> {
   const mime = e === 'svg' ? 'image/svg+xml' : e === 'jpg' ? 'image/jpeg' : `image/${e}`;
   const url = URL.createObjectURL(new Blob([data as BlobPart], { type: mime }));
   try {

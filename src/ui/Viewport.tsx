@@ -209,8 +209,10 @@ export function Viewport({ paneId }: { paneId: string }) {
       canvas.setPointerCapture(e.pointerId);
       dragging = { tool, pointerId: e.pointerId };
       lastInfo = p;
-      if (e.detail === 2 && tool.dblclick) tool.dblclick(p, doc);
-      else tool.down?.(p, doc);
+      if (e.detail === 2 && tool.dblclick) {
+        dblDone = true;
+        tool.dblclick(p, doc);
+      } else tool.down?.(p, doc);
       updateCursor(p, doc);
     };
 
@@ -274,6 +276,17 @@ export function Viewport({ paneId }: { paneId: string }) {
         t.up?.(p, doc);
         updateCursor(p, doc);
       }
+    };
+
+    // pointerdown не везде сообщает число кликов — родной dblclick как запасной путь
+    let dblDone = false;
+    const onDblClick = (e: MouseEvent) => {
+      const was = dblDone;
+      dblDone = false;
+      const doc = paneDoc();
+      if (was || !doc || spaceDown || getPickHook()) return;
+      const tool = currentTool();
+      if (tool.dblclick) tool.dblclick(info(e as PointerEvent, doc), doc);
     };
 
     const onLeave = () => {
@@ -343,6 +356,7 @@ export function Viewport({ paneId }: { paneId: string }) {
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('pointerleave', onLeave);
+    canvas.addEventListener('dblclick', onDblClick);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('gesturestart', onGestureStart);
     canvas.addEventListener('gesturechange', onGestureChange);
@@ -365,6 +379,7 @@ export function Viewport({ paneId }: { paneId: string }) {
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
       canvas.removeEventListener('pointerleave', onLeave);
+      canvas.removeEventListener('dblclick', onDblClick);
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('gesturestart', onGestureStart);
       canvas.removeEventListener('gesturechange', onGestureChange);
