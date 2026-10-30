@@ -4,7 +4,16 @@
 (Chrome + `window.__pe`). Не проверено руками: окно Tauri (WebP через Rust, двойной клик по `.pyard`
 в Finder — нужна собранная и установленная программа), импорт `.tpsheet` в Unity и `.tres` в Godot.
 
+## Сделано после 0.1.2 (2026-10-30)
+Колонки панелей (`src/dock.ts`), иконки (`core/icons.ts`, `ui/IconDialog.tsx`), PDF (`core/pdf.ts`,
+`ui/PdfDialogs.tsx`, pdfjs-dist), папки и метки слоёв (`Doc.groups`, `Layer.group/color`),
+редактор 9-slice (`Doc.nine`, `core/nineslice.ts`, `ui/panels/NinePanel.tsx`), библиотека растровых
+шрифтов (`core/fontLibrary.ts`) и BMFont в «Тексте». Не проверено в окне Tauri: воркер pdf.js (.mjs),
+открытие страниц .fnt рядом с файлом.
+
 ## Осталось / идеи
+- Папки: только один уровень (вложенные папки PSD сворачиваются в имена слоёв); режим наложения папки как целого.
+- Выделение нескольких слоёв в панели (⇧/⌘) — для группировки сразу нескольких.
 - Проверить `.tpsheet` в Unity (TexturePacker Importer) и `.tres` в Godot 4 на реальных проектах:
   синтаксис `.tpsheet` написан по памяти о выводе TexturePacker (`:format=40300`, `name;x;y;w;h; px;py; bl;br;bt;bb`, y снизу).
 - «Наилучший» на 300+ спрайтах — ~0,3–0,4 с на каждое изменение; при необходимости вынести упаковку в Web Worker.
