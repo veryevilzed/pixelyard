@@ -1,16 +1,18 @@
 import { createCanvas, ctx2d, normRect } from '../core/canvas';
 import type { Doc } from '../core/doc';
-import { floodMask } from '../core/flood';
+import { floodMaskData } from '../core/flood';
 import { compositeForView, toScreen } from '../core/render';
 import { combineSelection, featherSelection, selectionFromMask, shapeMask, type ShapeSpec } from '../core/selection';
 import type { Point, Rect, SelectMode } from '../core/types';
 import { app } from '../store';
 import { changed, dashedRect, infoLabel, requestRender, snapPoint, type PointerInfo, type Tool } from './base';
 
+/** ⇧ — добавить, ⌥ или Ctrl — вычесть, ⇧ вместе с ⌥/Ctrl — пересечение. */
 function modeFrom(p: PointerInfo): SelectMode {
-  if (p.shift && p.alt) return 'intersect';
+  const sub = p.alt || p.ctrl;
+  if (p.shift && sub) return 'intersect';
   if (p.shift) return 'add';
-  if (p.alt) return 'subtract';
+  if (sub) return 'subtract';
   return app().opts.selectMode;
 }
 
@@ -95,7 +97,12 @@ function makeMarquee(kind: 'rect' | 'ellipse'): Tool {
       if (moving) {
         const { dx, dy } = moving;
         moving = null;
-        if ((dx || dy) && doc.selection) {
+        // повторный клик внутри выделения без сдвига — снять выделение (как в Photoshop)
+        if (!dx && !dy) {
+          doc.setSelection(null);
+          return changed();
+        }
+        if (doc.selection) {
           const m = createCanvas(doc.width, doc.height);
           ctx2d(m).drawImage(doc.selection.mask, dx, dy);
           doc.setSelection(selectionFromMask(m), 'Переместить выделение');
@@ -279,14 +286,90 @@ function constrainAngle(a: Point, p: Point): Point {
 
 // ---------- волшебная палочка ----------
 
+/**
+ * Клик — выделить похожие пиксели. Если не отпускать кнопку и вести мышь вправо/влево,
+ * допуск растёт/уменьшается и выделение пересчитывается на лету.
+ */
+interface WandState {
+  x: number;
+  y: number;
+  sx: number;
+  sy: number;
+  base: number;
+  tol: number;
+  mode: SelectMode;
+  data: Uint8ClampedArray;
+  w: number;
+  h: number;
+  mask: HTMLCanvasElement | null;
+  /** Маска для показа: цветная заливка выделенного. */
+  tint: HTMLCanvasElement | null;
+  raf: number;
+}
+let wand: WandState | null = null;
+
+function wandCompute(s: WandState) {
+  const o = app().opts;
+  s.mask = floodMaskData(s.data, s.w, s.h, s.x, s.y, { tolerance: s.tol, contiguous: o.wandContiguous, antialias: o.selectAntialias });
+  if (!s.mask) return (s.tint = null);
+  const t = s.tint && s.tint.width === s.w && s.tint.height === s.h ? s.tint : createCanvas(s.w, s.h);
+  const tc = ctx2d(t);
+  tc.globalCompositeOperation = 'source-over';
+  tc.clearRect(0, 0, s.w, s.h);
+  tc.drawImage(s.mask, 0, 0);
+  tc.globalCompositeOperation = 'source-in';
+  tc.fillStyle = s.mode === 'subtract' ? 'rgba(255,60,60,0.45)' : 'rgba(40,140,255,0.45)';
+  tc.fillRect(0, 0, s.w, s.h);
+  s.tint = t;
+}
+
 export const wandTool: Tool = {
   cursor: () => 'crosshair',
   down(p, doc) {
     const o = app().opts;
     const src = o.wandSampleMerged ? compositeForView(doc) : doc.activeLayer?.canvas;
     if (!src) return;
-    const mask = floodMask(src, p.x, p.y, { tolerance: o.wandTolerance, contiguous: o.wandContiguous });
-    if (!mask) return;
-    applyShape(doc, { kind: 'mask', mask }, modeFrom(p));
+    const data = ctx2d(src).getImageData(0, 0, src.width, src.height).data;
+    wand = { x: p.x, y: p.y, sx: p.sx, sy: p.sy, base: o.wandTolerance, tol: o.wandTolerance, mode: modeFrom(p), data, w: src.width, h: src.height, mask: null, tint: null, raf: 0 };
+    wandCompute(wand);
+    requestRender();
+  },
+  drag(p) {
+    const s = wand;
+    if (!s) return;
+    // вправо/вверх — больше, влево/вниз — меньше; 2 px экрана = 1 единица допуска
+    const d = (p.sx - s.sx - (p.sy - s.sy)) / 2;
+    const tol = Math.round(Math.max(0, Math.min(255, s.base + d)));
+    if (tol === s.tol) return;
+    s.tol = tol;
+    if (!s.raf)
+      s.raf = requestAnimationFrame(() => {
+        s.raf = 0;
+        wandCompute(s);
+        requestRender();
+      });
+  },
+  up(_p, doc) {
+    const s = wand;
+    wand = null;
+    if (!s) return;
+    if (s.raf) cancelAnimationFrame(s.raf);
+    wandCompute(s);
+    if (!s.mask) return requestRender();
+    applyShape(doc, { kind: 'mask', mask: s.mask }, s.mode);
+  },
+  deactivate() {
+    if (wand?.raf) cancelAnimationFrame(wand.raf);
+    wand = null;
+  },
+  overlay(ctx, v) {
+    const s = wand;
+    if (!s?.tint) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(s.tint, v.panX, v.panY, s.w * v.zoom, s.h * v.zoom);
+    ctx.restore();
+    const at = toScreen(v, { x: s.x, y: s.y });
+    infoLabel(ctx, `Допуск ${s.tol}${s.tol !== s.base ? ` (было ${s.base})` : ''} — ведите мышь вправо/влево`, at.x + 14, at.y + 14);
   },
 };

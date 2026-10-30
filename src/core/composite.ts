@@ -264,18 +264,29 @@ export function renderLayerContent(layer: Layer, src: HTMLCanvasElement, mask: H
   return full;
 }
 
-/** Кэш отрендеренных слоёв: ключ — объект слоя + ревизия документа. */
-const cache = new WeakMap<Layer, { rev: number; patterns: number; canvas: HTMLCanvasElement }>();
+/** Версии пикселей холстов: растут при каждой правке (Doc.edit, отмена/повтор). */
+const canvasVersions = new WeakMap<HTMLCanvasElement, number>();
+export function touchCanvas(c: HTMLCanvasElement | null | undefined) {
+  if (c) canvasVersions.set(c, (canvasVersions.get(c) ?? 0) + 1);
+}
+const ver = (c: HTMLCanvasElement | null) => (c ? canvasVersions.get(c) ?? 0 : -1);
 
-export function renderLayer(layer: Layer, rev: number): HTMLCanvasElement {
+/**
+ * Кэш отрендеренных слоёв (эффекты, маска): ключ — объект слоя (свойства неизменяемы)
+ * + версии пикселей слоя и маски. Правка одного слоя не пересчитывает эффекты остальных.
+ */
+const cache = new WeakMap<Layer, { pix: number; mask: number; patterns: number; canvas: HTMLCanvasElement }>();
+
+export function renderLayer(layer: Layer, _rev?: number): HTMLCanvasElement {
   const masked = !!layer.mask && layer.maskEnabled;
   if (!masked && !hasEffects(layer.effects) && layer.fillOpacity >= 1) return layer.canvas;
   // узоры грузятся асинхронно — после загрузки кэш нужно пересчитать
   const patterns = usePatterns.getState().loaded;
+  const pix = ver(layer.canvas), mask = ver(layer.mask);
   const hit = cache.get(layer);
-  if (hit && hit.rev === rev && hit.patterns === patterns) return hit.canvas;
+  if (hit && hit.pix === pix && hit.mask === mask && hit.patterns === patterns) return hit.canvas;
   const c = renderLayerContent(layer, layer.canvas, layer.mask);
-  cache.set(layer, { rev, patterns, canvas: c });
+  cache.set(layer, { pix, mask, patterns, canvas: c });
   return c;
 }
 

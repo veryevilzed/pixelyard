@@ -98,7 +98,7 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   fillPattern: 'builtin-Шахматка',
   wandTolerance: 32,
   wandContiguous: true,
-  wandSampleMerged: false,
+  wandSampleMerged: true,
   selectMode: 'replace',
   selectAntialias: false,
   selectFixed: 'none',
@@ -200,7 +200,13 @@ interface AppState {
 
 const savedOpts = (() => {
   try {
-    return JSON.parse(localStorage.getItem('pixelyard.opts') ?? '{}') as Partial<ToolOptions>;
+    const o = JSON.parse(localStorage.getItem('pixelyard.opts') ?? '{}') as Partial<ToolOptions>;
+    // v2: палочка по умолчанию смотрит на видимое изображение, а не на активный слой
+    if (localStorage.getItem('pixelyard.optsVersion') !== '2') {
+      delete o.wandSampleMerged;
+      localStorage.setItem('pixelyard.optsVersion', '2');
+    }
+    return o;
   } catch {
     return {};
   }

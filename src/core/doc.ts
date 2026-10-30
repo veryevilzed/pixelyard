@@ -1,5 +1,5 @@
 import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid } from './canvas';
-import { blendToComposite, compositeLayers, grayToMaskData, maskToGray } from './composite';
+import { blendToComposite, compositeLayers, grayToMaskData, maskToGray, touchCanvas } from './composite';
 import type { AtlasState } from './atlas';
 import type { PackResult } from './pack';
 import { clampNine } from './nineslice';
@@ -257,6 +257,7 @@ export class Doc {
       fn(ctx, layer);
       ctx.restore();
     }
+    touchCanvas(canvas);
     return { layerId: layer.id, target, rect: r, before, after: ctx.getImageData(r.x, r.y, r.w, r.h) };
   }
 
@@ -317,7 +318,10 @@ export class Doc {
       // canvas общий для всех версий объекта слоя, поэтому ищем по id в текущем состоянии
       const layer = this.getLayer(p.layerId);
       const canvas = p.target === 'mask' ? layer?.mask : layer?.canvas;
-      if (canvas) ctx2d(canvas).putImageData(p[which], p.rect.x, p.rect.y);
+      if (canvas) {
+        ctx2d(canvas).putImageData(p[which], p.rect.x, p.rect.y);
+        touchCanvas(canvas);
+      }
     }
   }
 

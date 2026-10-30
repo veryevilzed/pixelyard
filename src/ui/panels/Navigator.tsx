@@ -1,8 +1,8 @@
 import { Crosshair, Maximize2, Minimize2, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { centerView, fitMode, zoomBy, zoomTo } from '../../actions';
-import { ctx2d } from '../../core/canvas';
-import { lastComposite, zoomAt } from '../../core/render';
+import { ctx2d, scaleCanvas } from '../../core/canvas';
+import { compositeVersion, lastComposite, zoomAt } from '../../core/render';
 import { sizeForDoc } from '../../panes';
 import { activeDoc, useApp } from '../../store';
 import { changed, onRenderRequest } from '../../tools/base';
@@ -32,6 +32,8 @@ export function Navigator() {
     const wrap = wrapRef.current!;
     let frame = 0;
     let lastThumb = 0;
+    // уменьшенное сведение кэшируется: пересчёт — только когда картинка изменилась
+    let thumb: { doc: object; version: number; w: number; h: number; canvas: HTMLCanvasElement } | null = null;
     const draw = () => {
       frame = 0;
       const d = activeDoc();
@@ -54,9 +56,13 @@ export function Navigator() {
         for (let x = (Math.floor(y / 6) % 2) * 6; x < L.w; x += 12) ctx.fillRect(L.x + x, L.y + y, Math.min(6, L.w - x), Math.min(6, L.h - y));
       const comp = lastComposite(d);
       if (comp) {
-        ctx.imageSmoothingEnabled = L.k < 1;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(comp, L.x, L.y, L.w, L.h);
+        const tw = Math.max(1, Math.round(L.w * dpr)), th = Math.max(1, Math.round(L.h * dpr));
+        const version = compositeVersion(d);
+        if (!thumb || thumb.doc !== d || thumb.version !== version || thumb.w !== tw || thumb.h !== th) {
+          thumb = { doc: d, version, w: tw, h: th, canvas: scaleCanvas(comp, tw, th, true) };
+        }
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(thumb.canvas, L.x, L.y, L.w, L.h);
       }
       lastThumb = performance.now();
       // видимая область документа

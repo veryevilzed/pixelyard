@@ -82,8 +82,8 @@ function SelectModeSeg({ o }: { o: ToolOptions }) {
       options={[
         { id: 'replace', label: 'Новое', title: 'Новое выделение' },
         { id: 'add', label: '+', title: 'Добавить (Shift)' },
-        { id: 'subtract', label: '−', title: 'Вычесть (Alt)' },
-        { id: 'intersect', label: '∩', title: 'Пересечение (Shift+Alt)' },
+        { id: 'subtract', label: '−', title: 'Вычесть (⌥ или Ctrl)' },
+        { id: 'intersect', label: '∩', title: 'Пересечение (⇧ + ⌥ или Ctrl)' },
       ]}
     />
   );
@@ -244,8 +244,9 @@ export function OptionsBar() {
           <SelectModeSeg o={o} />
           <SliderField label="Допуск" value={o.wandTolerance} min={0} max={255} onChange={(v) => setOpts({ wandTolerance: v })} />
           <Check label="Смежные пиксели" checked={o.wandContiguous} onChange={(v) => setOpts({ wandContiguous: v })} />
-          <Check label="По всем слоям" checked={o.wandSampleMerged} onChange={(v) => setOpts({ wandSampleMerged: v })} />
-          <span className="note">Совет: палочка по фону → Delete удаляет фон</span>
+          <Check label="По всем слоям" checked={o.wandSampleMerged} onChange={(v) => setOpts({ wandSampleMerged: v })} title="Выкл. — только активный слой" />
+          <Check label="Сглаживание" checked={o.selectAntialias} onChange={(v) => setOpts({ selectAntialias: v })} title="Мягкий край выделения в 1 px" />
+          <span className="note">Зажмите и ведите мышь вправо/влево — допуск больше/меньше. ⇧ — добавить, ⌥/Ctrl — вычесть</span>
         </>
       );
       break;

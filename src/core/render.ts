@@ -1,4 +1,5 @@
 import { createCanvas, ctx2d } from './canvas';
+import { usePatterns } from './patterns';
 import { compositeLayers, grayToMask, renderLayerContent } from './composite';
 import type { Doc, ViewState } from './doc';
 import type { ViewPrefs } from '../store';
@@ -68,8 +69,35 @@ const ensure = (c: HTMLCanvasElement | null, w: number, h: number) => {
   return c;
 };
 
-/** Сводит слои документа с учётом превью активного инструмента. */
+/** Что входило в последнее сведение: если ничего не поменялось — пересчёт не нужен. */
+interface CompKey {
+  rev: number;
+  layers: Doc['layers'];
+  groups: Doc['groups'];
+  editMask: boolean;
+  patterns: number;
+  w: number;
+  h: number;
+}
+const compKeys = new WeakMap<Doc, CompKey>();
+const compVersions = new WeakMap<Doc, number>();
+
+/** Номер версии сведения — растёт при каждом пересчёте (навигатор, миниатюры). */
+export const compositeVersion = (doc: Doc) => compVersions.get(doc) ?? 0;
+
+/**
+ * Сводит слои документа с учётом превью активного инструмента. Без превью и без изменений
+ * документа возвращает прошлый результат — движение мыши не пересводит слои.
+ */
 export function compositeForView(doc: Doc): HTMLCanvasElement {
+  const key: CompKey = { rev: doc.rev, layers: doc.layers, groups: doc.groups, editMask: doc.editingMask, patterns: usePatterns.getState().loaded, w: doc.width, h: doc.height };
+  const prev = compKeys.get(doc);
+  const cached = comps.get(doc);
+  if (cached && !doc.preview && prev && (Object.keys(key) as (keyof CompKey)[]).every((k) => prev[k] === key[k])) return cached;
+  // во время превью ключ сбрасывается — после него сведение пересчитается
+  if (doc.preview) compKeys.delete(doc);
+  else compKeys.set(doc, key);
+  compVersions.set(doc, compositeVersion(doc) + 1);
   const comp = ensure(comps.get(doc) ?? null, doc.width, doc.height);
   comps.set(doc, comp);
   scratch = ensure(scratch, doc.width, doc.height);
@@ -101,6 +129,43 @@ export function compositeForView(doc: Doc): HTMLCanvasElement {
     },
   });
   return comp;
+}
+
+/**
+ * Копии сведения для показа — в видеопамяти. Само сведение читается (пипетка, палочка), поэтому
+ * живёт в обычной памяти, и рисовать его на экран каждый кадр — это заливать в видеокарту весь
+ * документ заново. Копия обновляется только при новой версии сведения; при уменьшении берётся
+ * уровень ½, ¼… (быстрее и без «муара»).
+ */
+const displays = new WeakMap<Doc, { version: number; levels: HTMLCanvasElement[] }>();
+const gpuCanvas = (w: number, h: number) => {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+};
+function displayFor(doc: Doc, comp: HTMLCanvasElement, scale: number): HTMLCanvasElement {
+  const v = compositeVersion(doc);
+  let m = displays.get(doc);
+  if (!m || m.version !== v || m.levels[0]?.width !== comp.width || m.levels[0]?.height !== comp.height) {
+    const base = gpuCanvas(comp.width, comp.height);
+    base.getContext('2d')!.drawImage(comp, 0, 0);
+    displays.set(doc, (m = { version: v, levels: [base] }));
+  }
+  // нужный уровень: не мельче экранного размера (иначе потеряется резкость)
+  const want = scale < 0.5 ? Math.floor(Math.log2(1 / scale)) : 0;
+  for (let i = 1; i <= want; i++) {
+    if (!m.levels[i]) {
+      const prev = m.levels[i - 1];
+      if (prev.width < 64 || prev.height < 64) return prev;
+      const half = gpuCanvas(Math.max(1, Math.ceil(prev.width / 2)), Math.max(1, Math.ceil(prev.height / 2)));
+      const hc = half.getContext('2d')!;
+      hc.imageSmoothingQuality = 'high';
+      hc.drawImage(prev, 0, 0, half.width, half.height);
+      m.levels[i] = half;
+    }
+  }
+  return m.levels[want];
 }
 
 let checkerPattern: { key: string; pattern: CanvasPattern } | null = null;
@@ -221,15 +286,16 @@ function drawRulers(ctx: CanvasRenderingContext2D, view: ViewState, W: number, H
   ctx.restore();
 }
 
-export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
+/** Кэш подложки на каждый холст области просмотра. */
+const bases = new WeakMap<HTMLCanvasElement, { key: string; doc: Doc; canvas: HTMLCanvasElement }>();
+
+/** Фон, тень, шахматка, документ, попиксельная и пользовательская сетка. */
+function drawBase(ctx: CanvasRenderingContext2D, r: RenderInput, W: number, H: number, dr: Rect) {
   const { doc, view, prefs, dpr } = r;
-  const ctx = canvas.getContext('2d')!;
-  const W = canvas.width / dpr, H = canvas.height / dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#1b1b1d';
   ctx.fillRect(0, 0, W, H);
 
-  const dr = rectToScreen(view, { x: 0, y: 0, w: doc.width, h: doc.height });
   // тень документа
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(dr.x + 3, dr.y + 3, dr.w, dr.h);
@@ -242,7 +308,8 @@ export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
 
   ctx.imageSmoothingEnabled = view.zoom < 1;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(r.composite, dr.x, dr.y, dr.w, dr.h);
+  // при сильном уменьшении — заранее уменьшенная копия: быстрее и без «муара»
+  ctx.drawImage(doc.preview ? r.composite : displayFor(doc, r.composite, view.zoom * dpr), dr.x, dr.y, dr.w, dr.h);
 
   const vis = {
     x0: Math.max(0, Math.floor(-view.panX / view.zoom)),
@@ -289,6 +356,27 @@ export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
   ctx.strokeStyle = 'rgba(0,0,0,0.6)';
   ctx.lineWidth = 1;
   ctx.strokeRect(Math.round(dr.x) - 0.5, Math.round(dr.y) - 0.5, Math.round(dr.w) + 1, Math.round(dr.h) + 1);
+
+}
+
+export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
+  const { doc, view, prefs, dpr } = r;
+  const ctx = canvas.getContext('2d')!;
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  const dr = rectToScreen(view, { x: 0, y: 0, w: doc.width, h: doc.height });
+  // подложка (фон, шахматка, документ, сетки) кэшируется: движение мыши её не перерисовывает
+  const key = [compositeVersion(doc), view.zoom, view.panX, view.panY, canvas.width, canvas.height, dpr, prefs.checker, prefs.pixelGrid, prefs.grid, prefs.gridW, prefs.gridH, prefs.gridColor].join('|');
+  let base = bases.get(canvas);
+  if (doc.preview || !base || base.key !== key || base.doc !== doc) {
+    const c = base?.canvas.width === canvas.width && base.canvas.height === canvas.height ? base.canvas : gpuCanvas(canvas.width, canvas.height);
+    drawBase(c.getContext('2d')!, r, W, H, dr);
+    bases.set(canvas, (base = { key: doc.preview ? '' : key, doc, canvas: c }));
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'copy';
+  ctx.drawImage(base.canvas, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   if (prefs.slices) drawSlices(ctx, doc, view, prefs.sliceLabels);
   drawCuts(ctx, doc, view, dr);
