@@ -17,6 +17,26 @@
 - Настройки выгрузки **запоминаются**.
 - **Свой формат сохранения проекта**: zip со своим расширением, всё внутри, передаётся одним файлом.
 
+## Ответы пользователя (2026-10-30) — учитывать в первую очередь
+
+- **Расширение проекта: `.pyard`** (общий формат проектов PixelYard, не только атласы).
+- **Что сохраняет `.pyard`: атлас + связанные картинки.** Для каждого спрайта, который
+  редактировали в отдельной вкладке, хранить **многослойный исходник** (слои, маски, стили —
+  можно как PSD через `encodePsd`/`decodeFile`, внутри zip: `sources/<spriteId>.psd`). Двойной клик
+  открывает исходник со всеми слоями; спрайт в атласе = его композит. Без исходника — просто PNG.
+- **Движки: все** — Phaser/Pixi, Spine/libGDX, **Unity / Godot (новые форматы)**, Cocos/Starling.
+  - Unity: TexturePacker `.tpsheet` (формат для TexturePacker Importer) и/или JSON для своего
+    импортёра; Godot 4: `.tres` (AtlasTexture на каждый кадр) и `SpriteFrames` для анимаций.
+    Перед реализацией проверить точный синтаксис по документации.
+- **Свойства спрайта, кроме scale/trim/extrude/rotate/pivot:**
+  - **9-slice границы** (`nine: {left, top, right, bottom}`; libGDX/Spine `split:`, TP JSON
+    `borders`, Cocos/Unity — соответствующие поля; показывать направляющие в просмотре).
+  - **Анимации**: группировка кадров (`run_0`, `run_1`… или вручную) в анимацию с fps и
+    режимом (loop/ping-pong); выгрузка в Phaser 3 (`anims`), Spine/libGDX (index по суффиксу),
+    Godot `SpriteFrames`, JSON; превью анимации в панели.
+  - **Папки/группы**: дерево в списке спрайтов, имена с префиксом пути (`ui/button`),
+    опция «включать путь в имя кадра».
+
 ## Решения по дизайну
 
 ### Атлас как документ
@@ -96,12 +116,12 @@ interface AtlasState { sprites: AtlasSprite[]; settings: AtlasSettings; export: 
 - **WebP для BMFont**: в `BMFontDialog` добавить выбор формата картинки и запоминание
   (`localStorage pixelyard.bmfont`), расширение в `.fnt`/JSON.
 
-### Файл проекта `.pyatlas` (уточнить расширение — см. вопросы)
-- zip (fflate): `project.json` + `sprites/<id>.png`.
-- `project.json`: `{ format: 'pixelyard-atlas', version: 1, name, settings, export, sprites: [{id,name,file,scale,trim,extrude,rotate,pivotX,pivotY}] }`.
+### Файл проекта `.pyard`
+- zip (fflate): `project.json` + `sprites/<id>.png` + `sources/<id>.psd` (многослойные исходники).
+- `project.json`: `{ format: 'pixelyard', kind: 'atlas', version: 1, name, settings, export, animations, sprites: [{id,name,folder,file,source?,scale,trim,extrude,rotate,pivotX,pivotY,nine}] }`.
 - Открытие: `decodeFile` по расширению → атлас-документ; фильтр в `OPEN_FILTERS`.
-- Сохранение: ⌘S на атласе → `.pyatlas`; путь в `doc.path`.
-- Tauri: позже можно добавить `bundle.fileAssociations` для `.pyatlas`.
+- Сохранение: ⌘S на атласе → `.pyard`; путь в `doc.path`.
+- Tauri: добавить `bundle.fileAssociations` для `.pyard` (двойной клик в Finder).
 
 ### Интерфейс
 - **Инструмент атласа** (`src/tools/atlasTool.ts`): `effectiveTool()` подменяет любой инструмент,
@@ -135,7 +155,9 @@ interface AtlasState { sprites: AtlasSprite[]; settings: AtlasSettings; export: 
 5. Инструмент атласа + оверлей.
 6. Панель «Атлас» + опции упаковки + меню «Атлас».
 7. Связанные документы (редактирование спрайта).
-8. Открытие/сохранение `.pyatlas`.
+8. Открытие/сохранение `.pyard` (+ исходники PSD спрайтов).
+8a. Папки, 9-slice, анимации (модель, панель, превью анимации).
+8b. Форматы Unity и Godot.
 9. WebP в BMFont; кнопка «Открыть как проект атласа» в «Спрайтшите».
 10. Проверка в браузере (vite + Chrome, `window.__pe`), скриншот в README, CHANGELOG 0.2.0.
 
