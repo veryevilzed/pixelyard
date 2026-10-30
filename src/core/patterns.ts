@@ -11,7 +11,7 @@ export interface PatternInfo {
   builtin?: boolean;
 }
 
-const STORAGE_KEY = 'photoedit.patterns';
+const STORAGE_KEY = 'pixelyard.patterns';
 
 /** Готовые canvas узоров по id; заполняется при загрузке. */
 const canvases = new Map<string, HTMLCanvasElement>();

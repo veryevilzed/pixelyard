@@ -4,7 +4,7 @@ import { confirmDialog, isTauri, onFileDrop, setWindowTitle } from './core/platf
 import { adjustSize, cycleTool, eventShortcut, findShortcut } from './menu';
 import { activeDoc, app, openDialog, useApp } from './store';
 import { cycleTab } from './panes';
-import { APP_TITLE, APP_VERSION } from './version';
+import { APP_NAME, APP_TITLE, APP_VERSION } from './version';
 import { effectiveTool } from './tools';
 import { Dialogs } from './ui/Dialogs';
 import { MenuBar } from './ui/MenuBar';
@@ -50,7 +50,7 @@ function EmptyState() {
   return (
     <div className="empty">
       <h2>
-        PhotoEdit <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 14 }}>{APP_VERSION}</span>
+        {APP_NAME} <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 14 }}>{APP_VERSION}</span>
       </h2>
       <div className="row">
         <button className="btn primary" onClick={() => openDialog({ kind: 'new' })}>Новый документ</button>

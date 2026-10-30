@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PhotoEdit — интерактивная сборка подписанного и нотаризованного приложения для macOS.
+// PixelYard — интерактивная сборка подписанного и нотаризованного приложения для macOS.
 //
 //   npm run release              — спросит всё по шагам
 //   npm run release -- --yes     — взять сохранённые ответы, спросить только секреты
@@ -23,7 +23,7 @@ const DRY = args.has('--dry-run');
 const YES = args.has('--yes') || args.has('-y');
 
 if (args.has('-h') || args.has('--help')) {
-  console.log(`Сборка PhotoEdit для macOS
+  console.log(`Сборка PixelYard для macOS
 
   npm run release              интерактивно
   npm run release -- --yes     использовать сохранённые ответы
@@ -203,7 +203,7 @@ function profileWorks(name) {
 // ---------- шаги ----------
 
 async function main() {
-  console.log(bold('\nPhotoEdit — сборка подписанного приложения для macOS'));
+  console.log(bold('\nPixelYard — сборка подписанного приложения для macOS'));
   if (DRY) console.log(yellow('    Режим --dry-run: команды будут только показаны'));
 
   // 1. окружение
@@ -247,8 +247,8 @@ async function main() {
   // 3. метаданные приложения
   step(3, 'Приложение');
   const user = os.userInfo().username.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'me';
-  let productName = saved.productName ?? 'PhotoEdit';
-  let identifier = saved.identifier ?? `com.${user}.photoedit`;
+  let productName = saved.productName ?? 'PixelYard';
+  let identifier = saved.identifier ?? `com.${user}.pixelyard`;
   let copyright = saved.copyright ?? `© ${new Date().getFullYear()}`;
   let minimumSystemVersion = saved.minimumSystemVersion ?? '11.0';
   if (!YES) {
@@ -328,7 +328,7 @@ async function main() {
     const savedM = methods.findIndex((m) => m.value === saved.notaryMethod);
     const method = YES && savedM >= 0 ? methods[savedM].value : await choose('Как нотаризовать?', methods, savedM >= 0 ? savedM : 0);
     if (method === 'profile') {
-      const profile = YES && saved.notaryProfile ? saved.notaryProfile : await ask('Имя профиля', saved.notaryProfile ?? 'photoedit-notary');
+      const profile = YES && saved.notaryProfile ? saved.notaryProfile : await ask('Имя профиля', saved.notaryProfile ?? 'pixelyard-notary');
       if (!DRY && !profileWorks(profile)) {
         warn(`Профиль «${profile}» не найден или не работает — создадим`);
         info('notarytool спросит пароль приложения сам; он сохранится в связке ключей.');
@@ -342,7 +342,7 @@ async function main() {
       const password = await askSecret('Пароль приложения (не пароль Apple ID; ввод скрыт)');
       notary = { method, appleId, password, team: identity.team };
       if (!DRY && (await confirm('Сохранить как профиль связки ключей, чтобы больше не вводить?', true))) {
-        const profile = await ask('Имя профиля', 'photoedit-notary');
+        const profile = await ask('Имя профиля', 'pixelyard-notary');
         await run('xcrun', ['notarytool', 'store-credentials', profile, '--apple-id', appleId, '--team-id', identity.team, '--password', password], { secretArgs: [password] });
         notary = { method: 'profile', profile };
         saved.notaryProfile = profile;
@@ -394,7 +394,7 @@ async function main() {
     identifier,
     bundle: { copyright, macOS: { minimumSystemVersion, hardenedRuntime: true } },
   };
-  const overridePath = path.join(os.tmpdir(), `photoedit-release-${process.pid}.json`);
+  const overridePath = path.join(os.tmpdir(), `pixelyard-release-${process.pid}.json`);
   if (!DRY) fs.writeFileSync(overridePath, JSON.stringify(override));
   const env = { CI: 'false' };
   // подпись делает Tauri; нотаризацию — этот скрипт (переменные APPLE_ID и т.п. не передаём)
@@ -466,7 +466,7 @@ async function main() {
   step(11, 'Образ диска и архив');
   const zipPath = path.join(outDir, `${base}.zip`);
   await run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
-  const stage = path.join(os.tmpdir(), `photoedit-dmg-${process.pid}`);
+  const stage = path.join(os.tmpdir(), `pixelyard-dmg-${process.pid}`);
   const dmgPath = path.join(outDir, `${base}.dmg`);
   if (!DRY) {
     fs.rmSync(stage, { recursive: true, force: true });

@@ -6,7 +6,7 @@ import { autoSlices, gridSlices, type AutoOptions, type GridOptions } from '../c
 import type { RGBA, Slice } from '../core/types';
 import { formatShortcut, MENUS, type MenuEntry } from '../menu';
 import { isTauri } from '../core/platform';
-import { APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
+import { APP_NAME, APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
 import { activeDoc, closeDialog, setPrefs, toast, useApp, type DialogState } from '../store';
 import { changed, requestRender } from '../tools/base';
 import { Check, ColorField, NumberField, Seg, TextInput } from './controls';
@@ -381,7 +381,7 @@ function ExportDialog({ d }: { d: Extract<DialogState, { kind: 'export' }> }) {
   const initialSource = d.source ?? (doc.slices.length ? 'slices' : doc.layers.length > 1 ? 'layers' : 'merged');
   const stored = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('photoedit.export') ?? '{}') as Partial<ExportOptions>;
+      return JSON.parse(localStorage.getItem('pixelyard.export') ?? '{}') as Partial<ExportOptions>;
     } catch {
       return {};
     }
@@ -401,7 +401,7 @@ function ExportDialog({ d }: { d: Extract<DialogState, { kind: 'export' }> }) {
 
   const run = async () => {
     const { ids: _ids, source: _src, ...persist } = o;
-    localStorage.setItem('photoedit.export', JSON.stringify(persist));
+    localStorage.setItem('pixelyard.export', JSON.stringify(persist));
     setProgress('Подготовка…');
     try {
       const res = await runExport(doc, o, (n, t) => setProgress(`Экспорт ${n} / ${t}…`));
@@ -575,7 +575,7 @@ function ShortcutsDialog() {
 
 function AboutDialog() {
   return (
-    <Modal title={`PhotoEdit ${APP_VERSION}`} onClose={closeDialog} footer={<button className="btn primary" onClick={closeDialog}>OK</button>}>
+    <Modal title={`${APP_NAME} ${APP_VERSION}`} onClose={closeDialog} footer={<button className="btn primary" onClick={closeDialog}>OK</button>}>
       <div>Редактор для подготовки игровых и UI-ресурсов: нарезка, слои, экспорт.</div>
       <div className="form-grid">
         <span className="lbl">Версия</span>

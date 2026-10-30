@@ -1,12 +1,12 @@
 [package]
-name = "photoedit"
+name = "pixelyard"
 version = "0.1.0"
 description = "Редактор изображений для подготовки ресурсов"
 edition = "2021"
 license = "Apache-2.0"
 
 [lib]
-name = "photoedit_lib"
+name = "pixelyard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -175,7 +175,7 @@ export async function runExport(doc: Doc, o: ExportOptions, onProgress?: (done: 
     }
     if (o.json) {
       files[`${safeFileName(o.prefix || fileStem(doc.name))}.json`] = jsonBytes({
-        meta: { app: 'PhotoEdit', document: doc.name, width: doc.width, height: doc.height, scales, format: o.format },
+        meta: { app: 'PixelYard', document: doc.name, width: doc.width, height: doc.height, scales, format: o.format },
         items: meta,
       });
     }
@@ -264,6 +264,6 @@ function atlasJson(doc: Doc, items: Item[], rects: Rect[], image: string, atlas:
   });
   return {
     frames,
-    meta: { app: 'PhotoEdit', version: '1.0', image, format: 'RGBA8888', size: { w: atlas.width, h: atlas.height }, scale: String(scale), source: doc.name },
+    meta: { app: 'PixelYard', version: '1.0', image, format: 'RGBA8888', size: { w: atlas.width, h: atlas.height }, scale: String(scale), source: doc.name },
   };
 }

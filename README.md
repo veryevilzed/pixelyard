@@ -1,4 +1,4 @@
-# PhotoEdit
+# PixelYard
 
 Десктопный редактор изображений для macOS, чтобы готовить игровые и UI-ресурсы:
 поправить картинку, нарезать на части, разложить по слоям и выгрузить каждый
@@ -11,7 +11,7 @@
 ```sh
 npm install
 npm run app:dev      # окно приложения с горячей перезагрузкой
-npm run app:build    # src-tauri/target/release/bundle/macos/PhotoEdit.app и .dmg
+npm run app:build    # src-tauri/target/release/bundle/macos/PixelYard.app и .dmg
 npm run dev          # только веб-интерфейс в браузере (http://localhost:1420)
 ```
 

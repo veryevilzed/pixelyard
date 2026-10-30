@@ -2,6 +2,8 @@
  * Тонкая прослойка над файловой системой: в Tauri — нативные диалоги и прямая
  * запись на диск, в браузере (vite dev) — <input type=file> и скачивание.
  */
+import { APP_NAME } from '../version';
+
 export interface LoadedFile {
   name: string;
   path: string | null;
@@ -104,7 +106,7 @@ export async function setWindowTitle(title: string) {
   }
 }
 
-export async function confirmDialog(message: string, title = 'PhotoEdit'): Promise<boolean> {
+export async function confirmDialog(message: string, title = APP_NAME): Promise<boolean> {
   if (isTauri) {
     const { ask } = await import('@tauri-apps/plugin-dialog');
     return ask(message, { title, kind: 'warning' });

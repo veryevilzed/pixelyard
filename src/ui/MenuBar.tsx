@@ -2,7 +2,7 @@ import { Check, ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { formatShortcut, MENUS, type MenuEntry } from '../menu';
 import { useApp } from '../store';
-import { APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
+import { APP_NAME, APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
 
 export function MenuBar() {
   const [open, setOpen] = useState<number | null>(null);
@@ -34,7 +34,7 @@ export function MenuBar() {
   return (
     <div className="menubar" ref={barRef}>
       <span className="brand" title={`Сборка ${BUILD_COMMIT} от ${BUILD_DATE}`}>
-        PhotoEdit <span className="ver">{APP_VERSION}</span>
+        {APP_NAME} <span className="ver">{APP_VERSION}</span>
       </span>
       {MENUS.map((m, i) => (
         <span

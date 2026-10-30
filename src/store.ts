@@ -191,14 +191,14 @@ interface AppState {
 
 const savedOpts = (() => {
   try {
-    return JSON.parse(localStorage.getItem('photoedit.opts') ?? '{}') as Partial<ToolOptions>;
+    return JSON.parse(localStorage.getItem('pixelyard.opts') ?? '{}') as Partial<ToolOptions>;
   } catch {
     return {};
   }
 })();
 const savedPrefs = (() => {
   try {
-    return JSON.parse(localStorage.getItem('photoedit.prefs') ?? '{}') as Partial<ViewPrefs>;
+    return JSON.parse(localStorage.getItem('pixelyard.prefs') ?? '{}') as Partial<ViewPrefs>;
   } catch {
     return {};
   }
@@ -240,8 +240,8 @@ export const useApp = create<AppState>(() => ({
 }));
 
 useApp.subscribe((s, prev) => {
-  if (s.opts !== prev.opts) localStorage.setItem('photoedit.opts', JSON.stringify(s.opts));
-  if (s.prefs !== prev.prefs) localStorage.setItem('photoedit.prefs', JSON.stringify(s.prefs));
+  if (s.opts !== prev.opts) localStorage.setItem('pixelyard.opts', JSON.stringify(s.opts));
+  if (s.prefs !== prev.prefs) localStorage.setItem('pixelyard.prefs', JSON.stringify(s.prefs));
 });
 
 /** Отдельный «быстрый» стор для координат курсора, чтобы не перерисовывать всё приложение. */

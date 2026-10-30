@@ -37,7 +37,7 @@ fn encode_webp(request: Request) -> Result<Response, String> {
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let app_menu = Submenu::with_items(
         app,
-        "PhotoEdit",
+        "PixelYard",
         true,
         &[
             &PredefinedMenuItem::about(app, None, None)?,
@@ -71,5 +71,5 @@ pub fn run() {
         .menu(build_menu)
         .invoke_handler(tauri::generate_handler![encode_webp])
         .run(tauri::generate_context!())
-        .expect("ошибка запуска PhotoEdit");
+        .expect("ошибка запуска PixelYard");
 }
