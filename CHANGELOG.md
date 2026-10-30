@@ -3,7 +3,7 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
 Раздел текущей версии `npm run release` берёт в описание релиза на GitHub.
 
-## [0.2.0] — не выпущено
+## [0.2.0] — 2026-10-30
 
 ### Редактор атласов
 - Атлас — документ-проект: спрайты по папкам, свойства выбранных (масштаб, обрезка, extrude, поворот, опорная точка, 9-slice)
@@ -36,4 +36,5 @@
 ### Сборка
 - Подписанные и нотаризованные сборки: `npm run release` (организации Apple, выпуск Developer ID)
 
+[0.2.0]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.2.0
 [0.1.1]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.1.1
