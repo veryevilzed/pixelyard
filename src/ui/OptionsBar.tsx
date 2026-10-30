@@ -1,0 +1,314 @@
+import { Circle, Minus, Square } from 'lucide-react';
+import * as A from '../actions';
+import { activeDoc, openDialog, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
+import { Check, NumberField, Seg, SliderField } from './controls';
+import { TOOL_LABELS } from './Toolbox';
+import { PatternButton } from './PatternPicker';
+import { cancelTransform, commitTransform, quadAngle, quadSize, resetTransform, rotateQuad, scaleQuad, setQuad, translateQuad, TRANSFORM_MODES, useTransform } from '../tools/transform';
+import { quadCenter } from '../core/warp';
+import { applyCrop, useCrop } from '../tools/crop';
+import { changed } from '../tools/base';
+
+const FONTS = [
+  { id: '-apple-system, Helvetica, Arial, sans-serif', label: 'Системный' },
+  { id: 'Helvetica Neue, Helvetica, Arial, sans-serif', label: 'Helvetica' },
+  { id: 'Georgia, serif', label: 'Georgia' },
+  { id: 'Times New Roman, serif', label: 'Times' },
+  { id: 'Menlo, Monaco, monospace', label: 'Menlo' },
+  { id: 'Courier New, monospace', label: 'Courier' },
+  { id: 'Impact, sans-serif', label: 'Impact' },
+  { id: 'Arial Black, sans-serif', label: 'Arial Black' },
+];
+
+function SelectModeSeg({ o }: { o: ToolOptions }) {
+  return (
+    <Seg
+      value={o.selectMode}
+      onChange={(v) => setOpts({ selectMode: v })}
+      options={[
+        { id: 'replace', label: 'Новое', title: 'Новое выделение' },
+        { id: 'add', label: '+', title: 'Добавить (Shift)' },
+        { id: 'subtract', label: '−', title: 'Вычесть (Alt)' },
+        { id: 'intersect', label: '∩', title: 'Пересечение (Shift+Alt)' },
+      ]}
+    />
+  );
+}
+
+export function OptionsBar() {
+  const tool = useApp((s) => s.tool);
+  const o = useApp((s) => s.opts);
+  const prefs = useApp((s) => s.prefs);
+  const transform = useTransform();
+  const crop = useCrop((s) => s.rect);
+  useApp((s) => s.tick);
+
+  if (transform.active) {
+    const q = transform.quad;
+    const c = quadCenter(q);
+    const { w, h } = quadSize(q);
+    const ang = (quadAngle(q) * 180) / Math.PI;
+    return (
+      <div className="optionsbar">
+        <span className="tool-name">Трансформация</span>
+        <Seg value={transform.mode} onChange={(mode) => useTransform.setState({ mode })} options={TRANSFORM_MODES.map((m) => ({ id: m.id, label: m.label }))} />
+        <span className="divider" />
+        <NumberField label="X" value={Math.round(c.x)} onChange={(v) => setQuad(translateQuad(q, { x: v - c.x, y: 0 }))} />
+        <NumberField label="Y" value={Math.round(c.y)} onChange={(v) => setQuad(translateQuad(q, { x: 0, y: v - c.y }))} />
+        <NumberField label="Ш" value={Math.round(w)} min={1} onChange={(v) => setQuad(scaleQuad(q, c, v / Math.max(1, w), 1))} suffix="px" />
+        <NumberField label="В" value={Math.round(h)} min={1} onChange={(v) => setQuad(scaleQuad(q, c, 1, v / Math.max(1, h)))} suffix="px" />
+        <NumberField label="∠" value={Math.round(ang * 10) / 10} step={0.1} onChange={(v) => setQuad(rotateQuad(q, c, ((v - ang) * Math.PI) / 180))} suffix="°" />
+        <button className="btn" title="Отразить по горизонтали" onClick={() => setQuad(scaleQuad(q, c, -1, 1))}>↔</button>
+        <button className="btn" title="Отразить по вертикали" onClick={() => setQuad(scaleQuad(q, c, 1, -1))}>↕</button>
+        <button className="btn" title="Повернуть на 90° по часовой" onClick={() => setQuad(rotateQuad(q, c, Math.PI / 2))}>⟳90°</button>
+        <button className="btn" title="Повернуть на 180°" onClick={() => setQuad(rotateQuad(q, c, Math.PI))}>180°</button>
+        <button className="btn" title="Вернуть исходную рамку" onClick={resetTransform}>Сброс</button>
+        <Check label="Сглаживание" checked={transform.smooth} onChange={(v) => { useTransform.setState({ smooth: v }); changed(); }} title="Выключите для пиксель-арта" />
+        <span className="note">⌘ — искажение угла / наклон стороны, ⌘⌥⇧ — перспектива, ⇧ — пропорции, ⌥ — от центра</span>
+        <span className="divider" />
+        <button className="btn" onClick={cancelTransform}>Отмена (Esc)</button>
+        <button className="btn primary" onClick={commitTransform}>Применить (Enter)</button>
+      </div>
+    );
+  }
+
+  const label = TOOL_LABELS[tool];
+  let body: React.ReactNode = null;
+
+  switch (tool) {
+    case 'brush':
+      body = (
+        <>
+          <SliderField label="Размер" value={o.brushSize} min={1} max={500} onChange={(v) => setOpts({ brushSize: v })} suffix="px" />
+          <SliderField label="Жёсткость" value={o.brushHardness} min={0} max={100} onChange={(v) => setOpts({ brushHardness: v })} suffix="%" />
+          <SliderField label="Непрозр." value={o.brushOpacity} min={1} max={100} onChange={(v) => setOpts({ brushOpacity: v })} suffix="%" />
+          <NumberField label="Интервал" value={o.brushSpacing} min={1} max={200} onChange={(v) => setOpts({ brushSpacing: v })} suffix="%" />
+          <Check label="Сглаживание" checked={o.brushAntialias} onChange={(v) => setOpts({ brushAntialias: v })} title="Выключите для жёстких пиксельных краёв" />
+          <Check label="Нажим пера" checked={o.pressure} onChange={(v) => setOpts({ pressure: v })} />
+          <span className="note">Alt — пипетка, Shift+клик — прямая, [ ] — размер</span>
+        </>
+      );
+      break;
+    case 'pencil':
+      body = (
+        <>
+          <NumberField label="Размер" value={o.pencilSize} min={1} max={256} onChange={(v) => setOpts({ pencilSize: Math.round(v) })} suffix="px" />
+          <Seg value={o.pencilShape} onChange={(v) => setOpts({ pencilShape: v })} options={[{ id: 'square', label: <Square size={12} />, title: 'Квадратный' }, { id: 'round', label: <Circle size={12} />, title: 'Круглый' }]} />
+          <SliderField label="Непрозр." value={o.brushOpacity} min={1} max={100} onChange={(v) => setOpts({ brushOpacity: v })} suffix="%" />
+          <Check label="Pixel perfect" checked={o.pixelPerfect} onChange={(v) => setOpts({ pixelPerfect: v })} title="Убирает лишние «уголки» у линий толщиной 1px" />
+          <Check label="Пиксельная сетка" checked={prefs.pixelGrid} onChange={(v) => setPrefs({ pixelGrid: v })} />
+          <span className="note">Рисует без сглаживания, точно по пикселям. Alt — пипетка</span>
+        </>
+      );
+      break;
+    case 'eraser':
+      body = (
+        <>
+          <Seg value={o.eraserMode} onChange={(v) => setOpts({ eraserMode: v })} options={[{ id: 'brush', label: 'Мягкий, сглаженный' }, { id: 'pencil', label: 'Жёсткий, попиксельно' }]} />
+          <SliderField label="Размер" value={o.eraserSize} min={1} max={500} onChange={(v) => setOpts({ eraserSize: v })} suffix="px" />
+          {o.eraserMode === 'brush' && <SliderField label="Жёсткость" value={o.eraserHardness} min={0} max={100} onChange={(v) => setOpts({ eraserHardness: v })} suffix="%" />}
+          <SliderField label="Непрозр." value={o.eraserOpacity} min={1} max={100} onChange={(v) => setOpts({ eraserOpacity: v })} suffix="%" />
+        </>
+      );
+      break;
+    case 'fill':
+      body = (
+        <>
+          <Seg value={o.fillMode} onChange={(v) => setOpts({ fillMode: v })} options={[{ id: 'color', label: 'Залить' }, { id: 'erase', label: 'Стереть область' }]} />
+          {o.fillMode === 'color' && (
+            <>
+              <Seg value={o.fillSource} onChange={(v) => setOpts({ fillSource: v })} options={[{ id: 'color', label: 'Основной цвет' }, { id: 'pattern', label: 'Узор' }]} />
+              {o.fillSource === 'pattern' && <PatternButton value={o.fillPattern} onChange={(id) => setOpts({ fillPattern: id })} />}
+            </>
+          )}
+          <SliderField label="Допуск" value={o.fillTolerance} min={0} max={255} onChange={(v) => setOpts({ fillTolerance: v })} />
+          <Check label="Смежные пиксели" checked={o.fillContiguous} onChange={(v) => setOpts({ fillContiguous: v })} />
+          <Check label="По всем слоям" checked={o.fillSampleMerged} onChange={(v) => setOpts({ fillSampleMerged: v })} />
+          <SliderField label="Непрозр." value={o.brushOpacity} min={1} max={100} onChange={(v) => setOpts({ brushOpacity: v })} suffix="%" />
+        </>
+      );
+      break;
+    case 'gradient':
+      body = (
+        <>
+          <Seg value={o.gradientKind} onChange={(v) => setOpts({ gradientKind: v })} options={[{ id: 'linear', label: 'Линейный' }, { id: 'radial', label: 'Радиальный' }]} />
+          <Check label="Основной → прозрачный" checked={o.gradientToTransparent} onChange={(v) => setOpts({ gradientToTransparent: v })} />
+          <Check label="Инверсия" checked={o.gradientReverse} onChange={(v) => setOpts({ gradientReverse: v })} />
+          <SliderField label="Непрозр." value={o.brushOpacity} min={1} max={100} onChange={(v) => setOpts({ brushOpacity: v })} suffix="%" />
+        </>
+      );
+      break;
+    case 'marquee-rect':
+    case 'marquee-ellipse':
+      body = (
+        <>
+          <SelectModeSeg o={o} />
+          <NumberField label="Растушевка" value={o.feather} min={0} max={250} onChange={(v) => setOpts({ feather: v })} suffix="px" />
+          <Check label="Сглаживание" checked={o.selectAntialias} onChange={(v) => setOpts({ selectAntialias: v })} />
+          <span className="divider" />
+          <span className="label">Стиль</span>
+          <select value={o.selectFixed} onChange={(e) => setOpts({ selectFixed: e.target.value as ToolOptions['selectFixed'] })}>
+            <option value="none">Обычный</option>
+            <option value="ratio">Пропорции</option>
+            <option value="size">Заданный размер</option>
+          </select>
+          {o.selectFixed !== 'none' && (
+            <>
+              <NumberField label="Ш" value={o.selectFixedW} min={1} onChange={(v) => setOpts({ selectFixedW: v })} />
+              <NumberField label="В" value={o.selectFixedH} min={1} onChange={(v) => setOpts({ selectFixedH: v })} />
+            </>
+          )}
+        </>
+      );
+      break;
+    case 'lasso':
+    case 'polygon-lasso':
+      body = (
+        <>
+          <SelectModeSeg o={o} />
+          <NumberField label="Растушевка" value={o.feather} min={0} max={250} onChange={(v) => setOpts({ feather: v })} suffix="px" />
+          <Check label="Сглаживание" checked={o.selectAntialias} onChange={(v) => setOpts({ selectAntialias: v })} />
+          {tool === 'polygon-lasso' && <span className="note">Клик — точка, двойной клик/Enter — замкнуть, ⌫ — убрать точку</span>}
+        </>
+      );
+      break;
+    case 'wand':
+      body = (
+        <>
+          <SelectModeSeg o={o} />
+          <SliderField label="Допуск" value={o.wandTolerance} min={0} max={255} onChange={(v) => setOpts({ wandTolerance: v })} />
+          <Check label="Смежные пиксели" checked={o.wandContiguous} onChange={(v) => setOpts({ wandContiguous: v })} />
+          <Check label="По всем слоям" checked={o.wandSampleMerged} onChange={(v) => setOpts({ wandSampleMerged: v })} />
+          <span className="note">Совет: палочка по фону → Delete удаляет фон</span>
+        </>
+      );
+      break;
+    case 'move':
+      body = (
+        <>
+          <Check label="Автовыбор слоя" checked={o.moveAutoSelect} onChange={(v) => setOpts({ moveAutoSelect: v })} />
+          <span className="note">⌘+клик — выбрать слой, Alt — перетащить копию, Shift — по оси, стрелки — сдвиг на 1px (⇧ 10px), ⌘T — трансформация</span>
+        </>
+      );
+      break;
+    case 'crop': {
+      const doc = activeDoc();
+      body = crop ? (
+        <>
+          <span>
+            {Math.round(crop.x)}, {Math.round(crop.y)} — {Math.round(crop.w)} × {Math.round(crop.h)}
+          </span>
+          <button className="btn" onClick={() => useCrop.setState({ rect: null })}>Отмена (Esc)</button>
+          <button className="btn primary" onClick={() => doc && applyCrop(doc, crop)}>Кадрировать (Enter)</button>
+        </>
+      ) : (
+        <span className="note">Протяните рамку. Рамка за пределами холста расширяет холст. Shift — квадрат</span>
+      );
+      break;
+    }
+    case 'knife':
+      body = (
+        <>
+          <Seg value={o.knifeDir} onChange={(v) => setOpts({ knifeDir: v })} options={[{ id: 'vertical', label: '│ Вертикально' }, { id: 'horizontal', label: '─ Горизонтально' }]} />
+          <span className="note">Клик — рез (⇧ — другое направление), тяните линию, ⌥+клик — удалить</span>
+          <button className="btn" onClick={() => openDialog({ kind: 'cut-step' })}>С шагом…</button>
+          <button className="btn" title="Поставить резы по направляющим" onClick={A.guidesToCuts}>По направляющим</button>
+          <span className="divider" />
+          <button className="btn" onClick={A.cutsToLayers}>Куски → слои</button>
+          <button className="btn" onClick={A.cutsToSlices}>Куски → слайсы</button>
+          <button className="btn primary" onClick={A.exportPieces}>Сохранить куски в файлы…</button>
+          <button className="btn" onClick={A.clearCuts}>Очистить</button>
+        </>
+      );
+      break;
+    case 'slice':
+      body = (
+        <>
+          <span className="note">Протяните, чтобы создать слайс. Клик — выбрать, перетаскивание — переместить, Delete — удалить, Alt — новый поверх существующего</span>
+          <Check label="Привязка к сетке" checked={prefs.snap} onChange={(v) => setPrefs({ snap: v })} />
+          <Check label="Сетка" checked={prefs.grid} onChange={(v) => setPrefs({ grid: v })} />
+          {prefs.grid && (
+            <>
+              <NumberField label="Ш" value={prefs.gridW} min={1} onChange={(v) => setPrefs({ gridW: v })} />
+              <NumberField label="В" value={prefs.gridH} min={1} onChange={(v) => setPrefs({ gridH: v })} />
+            </>
+          )}
+        </>
+      );
+      break;
+    case 'eyedropper':
+      body = (
+        <>
+          <Check label="По всем слоям" checked={o.eyedropperMerged} onChange={(v) => setOpts({ eyedropperMerged: v })} />
+          <span className="note">Клик — основной цвет, Alt+клик — фоновый</span>
+        </>
+      );
+      break;
+    case 'shape':
+      body = (
+        <>
+          <Seg
+            value={o.shapeKind}
+            onChange={(v) => setOpts({ shapeKind: v })}
+            options={[
+              { id: 'rect', label: <Square size={12} />, title: 'Прямоугольник' },
+              { id: 'ellipse', label: <Circle size={12} />, title: 'Эллипс' },
+              { id: 'line', label: <Minus size={12} />, title: 'Линия' },
+            ]}
+          />
+          {o.shapeKind !== 'line' && <Check label="Заливка" checked={o.shapeFill} onChange={(v) => setOpts({ shapeFill: v })} />}
+          {o.shapeKind !== 'line' && <Check label="Обводка" checked={o.shapeStroke} onChange={(v) => setOpts({ shapeStroke: v })} title="При заливке обводка рисуется фоновым цветом" />}
+          <NumberField label="Толщина" value={o.shapeStrokeWidth} min={1} max={200} onChange={(v) => setOpts({ shapeStrokeWidth: v })} suffix="px" />
+          {o.shapeKind === 'rect' && <NumberField label="Радиус" value={o.shapeRadius} min={0} max={500} onChange={(v) => setOpts({ shapeRadius: v })} suffix="px" />}
+          <Check label="Сглаживание" checked={o.shapeAntialias} onChange={(v) => setOpts({ shapeAntialias: v })} />
+          <Check label="Новым слоем" checked={o.shapeNewLayer} onChange={(v) => setOpts({ shapeNewLayer: v })} />
+        </>
+      );
+      break;
+    case 'text':
+      body = (
+        <>
+          <select value={o.textFont} onChange={(e) => setOpts({ textFont: e.target.value })}>
+            {FONTS.map((f) => (
+              <option key={f.id} value={f.id}>{f.label}</option>
+            ))}
+          </select>
+          <NumberField label="Кегль" value={o.textSize} min={4} max={1000} onChange={(v) => setOpts({ textSize: v })} suffix="px" />
+          <Check label={<b>Ж</b>} checked={o.textBold} onChange={(v) => setOpts({ textBold: v })} />
+          <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setOpts({ textItalic: v })} />
+          <Check label="Сглаживание" checked={o.textAntialias} onChange={(v) => setOpts({ textAntialias: v })} />
+          <span className="note">Клик — начать текст, ⌘Enter или клик снаружи — готово, Esc — отмена</span>
+        </>
+      );
+      break;
+    case 'hand':
+      body = <span className="note">Перетаскивайте холст. Пробел — временная рука в любом инструменте, колёсико/трекпад — прокрутка, ⌘/pinch — масштаб</span>;
+      break;
+    case 'zoom':
+      body = <span className="note">Клик — увеличить, Alt+клик — уменьшить, ⌘0 — целиком, ⌘1 — 100%</span>;
+      break;
+  }
+
+  const selTools = ['marquee-rect', 'marquee-ellipse', 'lasso', 'polygon-lasso', 'wand'];
+  const hasSel = !!activeDoc()?.selection;
+  return (
+    <div className="optionsbar">
+      <span className="tool-name">{label}</span>
+      {body}
+      {selTools.includes(tool) && (
+        <>
+          <span className="divider" />
+          <button className="btn" title="Выделить по цвету (⌥⌘O)" onClick={() => activeDoc() && openDialog({ kind: 'color-range' })}>По цвету…</button>
+          {hasSel && (
+            <>
+              <button className="btn" title="Кадрировать по выделению (⌥⌘X)" onClick={A.cropToSelection}>Кадрировать</button>
+              <button className="btn" title="Выделенное в новый документ (⌥⌘N)" onClick={() => A.selectionToNewDoc(false)}>В новый документ</button>
+              <button className="btn" title="Новый слой из выделенного (⌘J)" onClick={() => A.layerVia(false)}>На новый слой</button>
+              <button className="btn" title="Маска слоя из выделения" onClick={() => A.addMask('selection')}>В маску</button>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
