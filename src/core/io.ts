@@ -4,6 +4,7 @@ import { alphaBounds, canvasToBlob, createCanvas, cropCanvas, ctx2d } from './ca
 import { Doc } from './doc';
 import { decodeProject } from './atlas';
 import { newAtlasDoc } from './atlasDoc';
+import { largestIconPng } from './icons';
 import { isTauri, type FileFilter, type LoadedFile } from './platform';
 import { grayToMask, maskToGray } from './composite';
 import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffects, type RGBA } from './types';
@@ -11,7 +12,7 @@ import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffe
 export const OPEN_FILTERS: FileFilter[] = [
   {
     name: 'Изображения',
-    extensions: ['pyard', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'svg', 'heic', 'avif'],
+    extensions: ['pyard', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'psd', 'psb', 'tif', 'tiff', 'tga', 'ico', 'icns', 'svg', 'heic', 'avif'],
   },
   { name: 'Проект PixelYard', extensions: ['pyard'] },
   { name: 'Photoshop', extensions: ['psd', 'psb'] },
@@ -72,7 +73,13 @@ function singleLayerDoc(name: string, canvas: HTMLCanvasElement): Doc {
 }
 
 export async function decodeBrowserImage(data: Uint8Array, e: string): Promise<HTMLCanvasElement> {
-  const mime = e === 'svg' ? 'image/svg+xml' : e === 'jpg' ? 'image/jpeg' : `image/${e}`;
+  // ICO/ICNS: берём самый крупный PNG-кадр
+  if (e === 'ico' || e === 'icns') {
+    const png = largestIconPng(data, e);
+    if (png) return decodeBrowserImage(png, 'png');
+    if (e === 'icns') throw new Error('В этом .icns нет PNG-кадров (старый формат) — не поддерживается');
+  }
+  const mime = e === 'svg' ? 'image/svg+xml' : e === 'jpg' ? 'image/jpeg' : e === 'ico' ? 'image/x-icon' : `image/${e}`;
   const url = URL.createObjectURL(new Blob([data as BlobPart], { type: mime }));
   try {
     const img = new Image();

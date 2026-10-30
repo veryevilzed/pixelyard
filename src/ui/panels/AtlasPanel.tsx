@@ -11,7 +11,7 @@ import { ctx2d, uid } from '../../core/canvas';
 import type { Doc } from '../../core/doc';
 import { activeDoc, app, useApp } from '../../store';
 import { changed } from '../../tools/base';
-import { Check, NumberField, TextInput } from '../controls';
+import { Check, NumberField, scrollIntoList, TextInput } from '../controls';
 
 /** Ввод по буквам / прокрутка значения схлопываются в одну запись истории. */
 function mergeable(doc: Doc, label: string) {
@@ -52,12 +52,7 @@ export function AtlasPanel() {
   const activeRef = useRef<HTMLDivElement>(null);
   const sel0 = doc?.atlasSel[doc.atlasSel.length - 1];
   useEffect(() => {
-    // прокручиваем только список, а не всю боковую колонку
-    const row = activeRef.current, list = row?.closest('.panel-body.list') as HTMLElement | null;
-    if (!row || !list) return;
-    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
-    if (top < list.scrollTop) list.scrollTop = top;
-    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + row.offsetHeight - list.clientHeight;
+    scrollIntoList(activeRef.current);
   }, [sel0]);
   if (!doc) return <div className="panel-body note">Нет атласа</div>;
   const a = doc.atlas;

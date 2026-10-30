@@ -219,3 +219,12 @@ export function TextInput(props: { value: string; onChange: (v: string) => void;
     />
   );
 }
+
+/** Прокручивает строку в видимую область своего списка, не трогая боковую колонку целиком. */
+export function scrollIntoList(row: HTMLElement | null | undefined) {
+  const list = row?.closest('.panel-body.list') as HTMLElement | null;
+  if (!row || !list) return;
+  const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+  if (top < list.scrollTop) list.scrollTop = top;
+  else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + row.offsetHeight - list.clientHeight;
+}

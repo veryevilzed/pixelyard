@@ -191,7 +191,12 @@ export async function writeFiles(files: Record<string, Uint8Array>, zipStem: str
   const folder = await pickFolder();
   if (!folder) return null;
   await ensureDir(folder);
-  for (const n of names) await writePath(joinPath(folder, n), files[n]);
+  for (const n of names) {
+    // имена вида «icons/32x32.png» — с подпапками
+    const parts = n.split('/');
+    if (parts.length > 1) await ensureDir(joinPath(folder, parts.slice(0, -1).join('/')));
+    await writePath(joinPath(folder, n), files[n]);
+  }
   return { files: names.length, target: folder };
 }
 

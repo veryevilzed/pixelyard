@@ -4,6 +4,7 @@ import { FILTERS } from './core/filters';
 import { activeDoc, app, openDialog, setOpts, setPrefs, toast, useApp, type ToolId } from './store';
 import { changed } from './tools/base';
 import * as AT from './atlasActions';
+import { MODE_PANELS, resetDock, toggleTwoColumns, useDock } from './dock';
 import { isAtlas, selectedSprites, updateAtlas } from './core/atlasDoc';
 import { detectAnimations } from './core/atlas';
 
@@ -32,6 +33,7 @@ const atlas = () => {
   return d && isAtlas(d) ? d : null;
 };
 const hasAtlas = () => !!atlas();
+const dockMode = () => (atlas() ? 'atlas' : 'image');
 const hasSprites = () => (atlas()?.atlasSel.length ?? 0) > 0;
 const ADJUST_KEYS: Record<string, string> = {
   levels: 'Mod+L',
@@ -77,6 +79,7 @@ export const MENUS: Menu[] = [
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },
       { label: 'Растровый шрифт (BMFont)…', shortcut: 'Alt+Mod+F', action: () => openDialog({ kind: 'bmfont' }) },
+      { label: 'Иконка приложения (ICO, ICNS, favicon…)…', action: () => openDialog({ kind: 'icon' }), enabled: hasImg },
       { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasImg },
       'sep',
       { label: 'Закрыть', shortcut: 'Mod+W', action: () => { const d = activeDoc(); if (d) void A.closeDoc(d.id); }, enabled: hasDoc },
@@ -344,10 +347,14 @@ export const MENUS: Menu[] = [
       { label: 'Следующая вкладка', shortcut: 'Ctrl+Tab', action: () => P.cycleTab(1), enabled: hasDoc },
       { label: 'Предыдущая вкладка', shortcut: 'Shift+Ctrl+Tab', action: () => P.cycleTab(-1), enabled: hasDoc },
       'sep',
-      ...(['navigator', 'color', 'layers', 'slices', 'history'] as const).map((k) => ({
-        label: { navigator: 'Навигатор', color: 'Цвет', layers: 'Слои', slices: 'Слайсы', history: 'История' }[k],
+      { label: 'Панели в две колонки', action: () => toggleTwoColumns(dockMode()), checked: () => useDock.getState().layouts[dockMode()].cols.length > 1 },
+      { label: 'Сбросить раскладку панелей', action: () => resetDock(dockMode()) },
+      'sep',
+      ...(['navigator', 'color', 'layers', 'slices', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'] as const).map((k) => ({
+        label: { navigator: 'Навигатор', color: 'Цвет', layers: 'Слои', slices: 'Слайсы', atlas: 'Спрайты', sprite: 'Свойства спрайта', anims: 'Анимации', atlasExport: 'Выгрузка атласа', history: 'История' }[k],
         action: () => useApp.setState((s) => ({ panels: { ...s.panels, [k]: !s.panels[k] } })),
         checked: () => useApp.getState().panels[k],
+        enabled: () => MODE_PANELS[dockMode()].includes(k),
       })),
     ],
   },

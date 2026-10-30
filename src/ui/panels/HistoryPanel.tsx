@@ -1,3 +1,4 @@
+import { scrollIntoList } from '../controls';
 import { useEffect, useRef } from 'react';
 import { activeDoc, useApp } from '../../store';
 import { changed } from '../../tools/base';
@@ -7,7 +8,7 @@ export function HistoryPanel() {
   const doc = activeDoc();
   const curRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    curRef.current?.scrollIntoView({ block: 'nearest' });
+    scrollIntoList(curRef.current);
   }, [doc?.undoStack.length]);
   if (!doc) return <div className="panel-body note">Нет документа</div>;
   const past = doc.undoStack;

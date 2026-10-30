@@ -19,6 +19,7 @@ import { cancelTransform, startTransform, transformActive, type TransformMode } 
 import { clearPaintHover } from './tools/paint';
 import { useCrop } from './tools/crop';
 import { detachLinked, ownerAtlas, saveAtlasProject } from './atlasActions';
+import { buildIconFiles, DEFAULT_ICON } from './core/icons';
 import { isAtlas } from './core/atlasDoc';
 import { activateDoc, addDocToFocused, focusPane, removeDocFromPanes, sizeForDoc } from './panes';
 
@@ -130,9 +131,16 @@ const SAVE_FILTERS = [
   { name: 'JPEG', extensions: ['jpg', 'jpeg'] },
   { name: 'WebP', extensions: ['webp'] },
   { name: 'TIFF', extensions: ['tif', 'tiff'] },
+  { name: 'Иконка Windows (ICO)', extensions: ['ico'] },
+  { name: 'Иконка macOS (ICNS)', extensions: ['icns'] },
 ];
 
 async function encodeForPath(doc: Doc, name: string): Promise<Uint8Array> {
+  // иконки — стандартный набор размеров; тонкая настройка — «Файл → Иконка приложения»
+  if (/\.(ico|icns)$/i.test(name)) {
+    const files = await buildIconFiles(doc.composite(), { ...DEFAULT_ICON, platforms: [/\.ico$/i.test(name) ? 'windows' : 'macos'], name: 'x' });
+    return Object.values(files)[0];
+  }
   const fmt = formatFromName(name) ?? 'psd';
   if (fmt === 'psd') return encodePsd(doc);
   if (doc.layers.length > 1) toast(`Формат ${fmt.toUpperCase()} не хранит слои — сохранено сведённое изображение`);

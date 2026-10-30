@@ -3,14 +3,14 @@ import { useEffect, useRef } from 'react';
 import { activeDoc, openDialog, useApp } from '../../store';
 import { changed } from '../../tools/base';
 import type { Slice } from '../../core/types';
-import { Check, NumberField, TextInput } from '../controls';
+import { Check, NumberField, TextInput , scrollIntoList } from '../controls';
 
 export function SlicesPanel() {
   useApp((s) => s.tick);
   const doc = activeDoc();
   const activeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'nearest' });
+    scrollIntoList(activeRef.current);
   }, [doc?.activeSliceId]);
   if (!doc) return <div className="panel-body note">Нет документа</div>;
   const active = doc.slices.find((s) => s.id === doc.activeSliceId);

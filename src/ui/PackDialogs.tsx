@@ -133,7 +133,7 @@ function FormatPicker(props: {
   );
 }
 
-function RangeRow(props: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (v: number) => void }) {
+export function RangeRow(props: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (v: number) => void }) {
   return (
     <div className="range-row">
       <span className="lbl">{props.label}</span>
@@ -143,7 +143,7 @@ function RangeRow(props: { label: string; value: number; min: number; max: numbe
   );
 }
 
-function Line({ label, children }: { label: string; children: React.ReactNode }) {
+export function Line({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="range-row">
       <span className="lbl">{label}</span>

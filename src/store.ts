@@ -142,6 +142,7 @@ export type DialogState =
   | { kind: 'bmfont' }
   | { kind: 'new-guide' }
   | { kind: 'shortcuts' }
+  | { kind: 'icon' }
   | { kind: 'about' };
 
 export interface ViewPrefs {

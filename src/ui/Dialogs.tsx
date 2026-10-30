@@ -13,6 +13,7 @@ import { Check, ColorField, NumberField, Seg, TextInput } from './controls';
 import { ColorRangeDialog, CutStepDialog, FillDialog, LayerStyleDialog, NewGuideDialog } from './StyleDialogs';
 import { CurvesDialog } from './CurvesDialog';
 import { BMFontDialog, SpriteSheetDialog } from './PackDialogs';
+import { IconDialog } from './IconDialog';
 
 export function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: () => void; seeThrough?: boolean; width?: number }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
@@ -614,6 +615,7 @@ export function Dialogs() {
     case 'new-guide': return <NewGuideDialog />;
     case 'spritesheet': return <SpriteSheetDialog d={d} />;
     case 'bmfont': return <BMFontDialog />;
+    case 'icon': return <IconDialog />;
     case 'curves': return activeDoc()?.activeLayer ? <CurvesDialog /> : null;
     case 'fill': return activeDoc()?.activeLayer ? <FillDialog /> : null;
   }
