@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import * as A from './actions';
 import { addSpriteFiles, installAtlasSync, newAtlasFromFiles } from './atlasActions';
 import { isAtlas } from './core/atlasDoc';
+import { installNativeMenu, runMenuItem } from './nativeMenu';
 import { confirmDialog, isTauri, onFileDrop, onOpenedFiles, setWindowTitle } from './core/platform';
 import { adjustSize, cycleTool, eventShortcut, findShortcut } from './menu';
 import { activeDoc, app, openDialog, useApp } from './store';
@@ -35,7 +36,7 @@ function handleKey(e: KeyboardEvent) {
   const item = findShortcut(sc) ?? (sc === 'Shift+Mod+=' ? findShortcut('Mod+=') : null);
   if (item) {
     e.preventDefault();
-    if (!item.enabled || item.enabled()) item.action();
+    runMenuItem(item);
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -77,6 +78,7 @@ export function App() {
   }, [title]);
 
   useEffect(() => installAtlasSync(), []);
+  useEffect(() => void installNativeMenu(), []);
 
   useEffect(() => {
     let un: (() => void) | null = null;

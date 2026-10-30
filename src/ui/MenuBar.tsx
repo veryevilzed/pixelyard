@@ -2,9 +2,17 @@ import { Check, ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { formatShortcut, MENUS, type MenuEntry } from '../menu';
 import { useApp } from '../store';
+import { nativeMenuActive, runMenuItem } from '../nativeMenu';
 import { APP_NAME, APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
 
 export function MenuBar() {
+  useApp((s) => s.tick);
+  // в программе для macOS меню — системное (строка вверху экрана)
+  if (nativeMenuActive()) return null;
+  return <InWindowMenuBar />;
+}
+
+function InWindowMenuBar() {
   const [open, setOpen] = useState<number | null>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   useApp((s) => s.tick); // пересчитать enabled/checked
@@ -91,7 +99,7 @@ function MenuPopup({ items, x, y, onDone }: { items: MenuEntry[]; x: number; y: 
             onMouseUp={() => {
               if (!enabled) return;
               onDone();
-              it.action();
+              runMenuItem(it);
             }}
           >
             {it.checked?.() && (
