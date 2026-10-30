@@ -2,7 +2,7 @@ import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid } from './canvas';
 import { blendToComposite, compositeLayers, grayToMaskData, maskToGray } from './composite';
 import type { AtlasState } from './atlas';
 import type { PackResult } from './pack';
-import { DEFAULT_EFFECTS, type Cuts, type Layer, type Rect, type Selection, type Slice } from './types';
+import { DEFAULT_EFFECTS, type Cuts, type LabelColor, type Layer, type LayerGroup, type Rect, type Selection, type Slice } from './types';
 
 /** Снимок «структуры» документа: ссылки на неизменяемые объекты. */
 interface Snapshot {
@@ -15,6 +15,7 @@ interface Snapshot {
   selection: Selection | null;
   activeLayerId: string | null;
   atlas: AtlasState | null;
+  groups: LayerGroup[];
 }
 
 interface PixelPatch {
@@ -68,12 +69,16 @@ export class Doc {
   width: number;
   height: number;
   layers: Layer[] = [];
+  /** Папки слоёв (порядок не важен: место папки — место её слоёв). */
+  groups: LayerGroup[] = [];
   slices: Slice[] = [];
   cuts: Cuts = { x: [], y: [] };
   guides: Cuts = { x: [], y: [] };
   selection: Selection | null = null;
   activeLayerId: string | null = null;
   activeSliceId: string | null = null;
+  /** Выбранная в панели папка (вне истории). */
+  activeGroupId: string | null = null;
   /** Инструменты рисуют в маску активного слоя, а не в его пиксели. */
   editMask = false;
 
@@ -150,6 +155,8 @@ export class Doc {
       mask: null,
       maskEnabled: true,
       effects: DEFAULT_EFFECTS,
+      color: null,
+      group: null,
     };
   }
 
@@ -185,6 +192,7 @@ export class Doc {
       selection: this.selection,
       activeLayerId: this.activeLayerId,
       atlas: this.atlas,
+      groups: this.groups,
     };
   }
 
@@ -198,6 +206,7 @@ export class Doc {
     this.selection = s.selection;
     this.activeLayerId = s.activeLayerId;
     this.atlas = s.atlas;
+    this.groups = s.groups;
     if (this.activeSliceId && !this.slices.some((sl) => sl.id === this.activeSliceId)) this.activeSliceId = null;
   }
 
@@ -354,6 +363,7 @@ export class Doc {
     this.change('Удалить слой', () => {
       const idx = this.layerIndex(id);
       this.layers = this.layers.filter((l) => l.id !== id);
+      this.pruneGroups();
       if (this.activeLayerId === id) this.activeLayerId = this.layers[Math.max(0, idx - 1)]?.id ?? null;
     });
   }
@@ -379,8 +389,93 @@ export class Doc {
       const layers = [...this.layers];
       const [l] = layers.splice(from, 1);
       layers.splice(to, 0, l);
-      this.layers = layers;
+      this.layers = fixGroupAfterMove(layers, to);
+      this.pruneGroups();
     });
+  }
+
+  // ---------- папки ----------
+
+  getGroup(id: string | null | undefined) {
+    return id ? this.groups.find((g) => g.id === id) ?? null : null;
+  }
+
+  /** Папки без слоёв удаляются. */
+  private pruneGroups() {
+    const used = new Set(this.layers.map((l) => l.group).filter(Boolean));
+    if (this.groups.some((g) => !used.has(g.id))) this.groups = this.groups.filter((g) => used.has(g.id));
+  }
+
+  /** Новая папка из слоёв: они собираются подряд на месте самого верхнего. */
+  groupLayers(ids: string[], name = this.nextGroupName()) {
+    const set = new Set(ids);
+    const members = this.layers.filter((l) => set.has(l.id));
+    if (!members.length) return null;
+    const id = uid('gr');
+    this.change('Сгруппировать в папку', () => {
+      const top = Math.max(...members.map((l) => this.layerIndex(l.id)));
+      const rest = this.layers.filter((l) => !set.has(l.id));
+      // позиция вставки: после всех оставшихся слоёв, что были ниже самого верхнего выбранного
+      const below = this.layers.slice(0, top).filter((l) => !set.has(l.id)).length;
+      rest.splice(below, 0, ...members.map((l) => ({ ...l, group: id })));
+      this.layers = rest;
+      this.groups = [...this.groups, { id, name, visible: true, collapsed: false, opacity: 1, color: null }];
+      this.pruneGroups();
+    });
+    return id;
+  }
+
+  /** Убрать папку: слои остаются на своих местах. */
+  ungroup(groupId: string) {
+    this.change('Разгруппировать', () => {
+      this.layers = this.layers.map((l) => (l.group === groupId ? { ...l, group: null } : l));
+      this.groups = this.groups.filter((g) => g.id !== groupId);
+    });
+  }
+
+  /** Удалить папку вместе со слоями (хотя бы один слой в документе остаётся). */
+  removeGroupWithLayers(groupId: string) {
+    const left = this.layers.filter((l) => l.group !== groupId);
+    if (!left.length) return;
+    this.change('Удалить папку', () => {
+      this.layers = left;
+      this.groups = this.groups.filter((g) => g.id !== groupId);
+      if (!this.activeLayer) this.activeLayerId = left[left.length - 1].id;
+    });
+  }
+
+  updateGroup(id: string, patch: Partial<Omit<LayerGroup, 'id'>>, label = 'Свойства папки') {
+    this.change(label, () => {
+      this.groups = this.groups.map((g) => (g.id === id ? { ...g, ...patch } : g));
+    });
+  }
+
+  /** Перенос слоя в папку (наверх её слоёв) или из папки (над ней). */
+  moveLayerToGroup(layerId: string, groupId: string | null) {
+    const l = this.getLayer(layerId);
+    if (!l || (l.group ?? null) === groupId) return;
+    this.change(groupId ? 'В папку' : 'Из папки', () => {
+      const rest = this.layers.filter((x) => x.id !== layerId);
+      const ref = groupId ?? l.group;
+      const top = rest.reduce((m, x, i) => (x.group === ref ? i : m), -1);
+      const at = top < 0 ? rest.length : top + 1;
+      rest.splice(at, 0, { ...l, group: groupId });
+      this.layers = rest;
+      this.pruneGroups();
+    });
+  }
+
+  setLabelColor(ids: string[], color: LabelColor | null) {
+    const set = new Set(ids);
+    this.change('Цвет метки', () => {
+      this.layers = this.layers.map((l) => (set.has(l.id) ? { ...l, color } : l));
+    });
+  }
+
+  nextGroupName() {
+    let n = this.groups.length + 1;
+    while (this.groups.some((g) => g.name === `Папка ${n}`)) n++;
+    return `Папка ${n}`;
   }
 
   /**
@@ -404,6 +499,8 @@ export class Doc {
         blend: bottom.blend,
         clip: bottom.clip,
         visible: bottom.visible,
+        color: bottom.color ?? null,
+        group: bottom.group ?? null,
       });
       this.layers = layers;
       this.activeLayerId = bottom.id;
@@ -423,6 +520,7 @@ export class Doc {
     this.change('Выполнить сведение', () => {
       const layer = this.makeLayer('Фон', flat);
       this.layers = [layer];
+      this.groups = [];
       this.activeLayerId = layer.id;
     });
     this.editMask = false;
@@ -482,6 +580,23 @@ export class Doc {
       this.cuts = { x: norm(cuts.x, this.width), y: norm(cuts.y, this.height) };
     });
   }
+}
+
+/**
+ * После перемещения слоя на позицию at: внутри чужой папки (сосед снизу и сверху из неё) — входит в неё,
+ * рядом со своей — остаётся, иначе выходит из папки.
+ */
+function fixGroupAfterMove(layers: Layer[], at: number): Layer[] {
+  const l = layers[at];
+  const below = layers[at - 1]?.group ?? null, above = layers[at + 1]?.group ?? null;
+  let g: string | null;
+  if (below && below === above) g = below;
+  else if (l.group && (below === l.group || above === l.group)) g = l.group;
+  else g = null;
+  if ((l.group ?? null) === g) return layers;
+  const out = [...layers];
+  out[at] = { ...l, group: g };
+  return out;
 }
 
 export { blendToComposite };

@@ -1,9 +1,10 @@
-import { ArrowDown, ArrowUp, Copy, CornerLeftDown, Download, Eye, EyeOff, Lock, LockOpen, Merge, Plus, SquareDashed, Trash } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronRight, Copy, CornerLeftDown, Download, Eye, EyeOff, Folder, FolderOpen, FolderPlus, Lock, LockOpen, Merge, Plus, SquareDashed, Trash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import * as A from '../../actions';
 import { ctx2d } from '../../core/canvas';
 import { selectionFromAlpha } from '../../core/selection';
-import { BLEND_MODES, hasEffects, type BlendMode } from '../../core/types';
+import { BLEND_MODES, hasEffects, LABEL_COLORS, labelCss, type BlendMode, type LabelColor } from '../../core/types';
+import type { Doc } from '../../core/doc';
 import { activeDoc, openDialog, useApp } from '../../store';
 import { changed } from '../../tools/base';
 import { NumberField } from '../controls';
@@ -41,17 +42,21 @@ export function LayersPanel() {
   useApp((s) => s.tick);
   const doc = activeDoc();
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; over: number | null } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; over: number | null; group: string | null } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; layerId?: string; groupId?: string } | null>(null);
+  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   if (!doc) return <div className="panel-body note">Нет документа</div>;
   const active = doc.activeLayer;
   const rows = [...doc.layers].reverse();
 
   const select = (id: string) => {
-    if (doc.activeLayerId === id) return;
+    if (doc.activeLayerId === id && !doc.activeGroupId) return;
     doc.activeLayerId = id;
+    doc.activeGroupId = null;
     changed();
   };
+  const activeGroup = doc.getGroup(doc.activeGroupId);
 
   // перетаскивание для смены порядка — на pointer-событиях (без HTML5 DnD)
   const startDrag = (e: React.PointerEvent, id: string) => {
@@ -59,24 +64,32 @@ export function LayersPanel() {
     const startY = e.clientY;
     let moved = false;
     let over: number | null = null;
+    let group: string | null = null;
     const move = (ev: PointerEvent) => {
       if (!moved && Math.abs(ev.clientY - startY) < 5) return;
       moved = true;
-      const els = Array.from(listRef.current?.querySelectorAll('.layer-row') ?? []);
-      over = els.length;
-      for (let i = 0; i < els.length; i++) {
-        const r = els[i].getBoundingClientRect();
+      // над заголовком папки — положить в неё
+      const hit = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest('.group-row') as HTMLElement | null;
+      group = hit?.dataset.group ?? null;
+      const els = Array.from(listRef.current?.querySelectorAll<HTMLElement>('.layer-row[data-index]') ?? []);
+      over = rows.length;
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
         if (ev.clientY < r.top + r.height / 2) {
-          over = i;
+          over = Number(el.dataset.index);
           break;
         }
       }
-      setDrag({ id, over });
+      setDrag({ id, over: group ? null : over, group });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       setDrag(null);
+      if (moved && group) {
+        doc.moveLayerToGroup(id, group);
+        return changed();
+      }
       if (!moved || over === null) return;
       // over — позиция вставки в перевёрнутом списке (0 = самый верх)
       const from = rows.findIndex((l) => l.id === id);
@@ -91,9 +104,44 @@ export function LayersPanel() {
     window.addEventListener('pointerup', up);
   };
 
+  const groupProps = activeGroup && (
+    <div className="layer-props wrap">
+      <Folder size={13} style={{ color: labelCss(activeGroup.color) ?? 'var(--text-dim)', flexShrink: 0 }} />
+      <span className="layer-name">{activeGroup.name}</span>
+      <NumberField
+        label="Непрозр."
+        value={Math.round(activeGroup.opacity * 100)}
+        min={0}
+        max={100}
+        width={46}
+        suffix="%"
+        onChange={(v) => {
+          const last = doc.undoStack[doc.undoStack.length - 1];
+          if (last?.label === 'Непрозрачность папки' && last.after?.groups === doc.groups) doc.undo();
+          doc.updateGroup(activeGroup.id, { opacity: v / 100 }, 'Непрозрачность папки');
+          changed();
+        }}
+      />
+      <button className="btn small" onClick={() => (doc.ungroup(activeGroup.id), (doc.activeGroupId = null), changed())}>Разгруппировать</button>
+    </div>
+  );
+
+  // строки: заголовок папки перед её первым (верхним) слоем, слои свёрнутой папки скрыты
+  const items: ({ kind: 'layer'; l: (typeof rows)[number]; i: number; inGroup: boolean } | { kind: 'group'; id: string })[] = [];
+  const seen = new Set<string>();
+  rows.forEach((l, i) => {
+    const g = doc.getGroup(l.group);
+    if (g && !seen.has(g.id)) {
+      seen.add(g.id);
+      items.push({ kind: 'group', id: g.id });
+    }
+    if (!g || !g.collapsed) items.push({ kind: 'layer', l, i, inGroup: !!g });
+  });
+
   return (
     <>
-      {active && (
+      {groupProps}
+      {active && !activeGroup && (
         <div className="layer-props wrap">
           <select
             value={active.blend}
@@ -139,16 +187,78 @@ export function LayersPanel() {
         </div>
       )}
       {doc.editingMask && <div className="mask-hint">Рисование по маске: чёрный — скрыть, белый — показать</div>}
-      <div className="panel-body list" ref={listRef}>
-        {rows.map((l, i) => {
+      <div className="panel-body list" ref={listRef} style={{ minHeight: 180, maxHeight: "50vh" }} onPointerDown={() => setMenu(null)}>
+        {items.map((it) => {
+          if (it.kind === 'group') {
+            const g = doc.getGroup(it.id)!;
+            const color = labelCss(g.color);
+            return (
+              <div
+                key={g.id}
+                data-group={g.id}
+                className={`group-row ${doc.activeGroupId === g.id ? 'active' : ''} ${drag?.group === g.id ? 'drop-into' : ''} ${g.visible ? '' : 'hidden'}`}
+                style={color ? { boxShadow: `inset 3px 0 0 ${color}` } : undefined}
+                onPointerDown={() => {
+                  doc.activeGroupId = g.id;
+                  changed();
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, groupId: g.id });
+                }}
+              >
+                <button className="icon-btn" title={g.visible ? 'Скрыть папку' : 'Показать папку'} onPointerDown={(e) => e.stopPropagation()} onClick={() => (doc.updateGroup(g.id, { visible: !g.visible }, g.visible ? 'Скрыть папку' : 'Показать папку'), changed())}>
+                  {g.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+                <button className="icon-btn" title="Свернуть / развернуть" onPointerDown={(e) => e.stopPropagation()} onClick={() => (doc.updateGroup(g.id, { collapsed: !g.collapsed }, g.collapsed ? 'Развернуть папку' : 'Свернуть папку'), changed())}>
+                  <ChevronRight size={13} className={`chev ${g.collapsed ? '' : 'open'}`} />
+                </button>
+                {g.collapsed ? <Folder size={14} style={{ color: color ?? 'var(--text-dim)', flexShrink: 0 }} /> : <FolderOpen size={14} style={{ color: color ?? 'var(--text-dim)', flexShrink: 0 }} />}
+                {renamingGroup === g.id ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    defaultValue={g.name}
+                    style={{ flex: 1, minWidth: 0 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      if (e.key === 'Escape') setRenamingGroup(null);
+                    }}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      setRenamingGroup(null);
+                      if (v && v !== g.name) (doc.updateGroup(g.id, { name: v }, 'Переименовать папку'), changed());
+                    }}
+                  />
+                ) : (
+                  <span className="layer-name" onDoubleClick={() => setRenamingGroup(g.id)} title="Двойной клик — переименовать, правый клик — цвет и действия">
+                    {g.name}
+                    {g.opacity < 1 && <span style={{ color: 'var(--text-faint)' }}> · {Math.round(g.opacity * 100)}%</span>}
+                  </span>
+                )}
+                <span className="dim-count">{doc.layers.filter((x) => x.group === g.id).length}</span>
+              </div>
+            );
+          }
+          const { l, i, inGroup } = it;
+          const color = labelCss(l.color);
           const dropCls = drag && drag.over !== null && drag.id !== l.id ? (drag.over === i ? 'drop-above' : drag.over === i + 1 && i === rows.length - 1 ? 'drop-below' : '') : '';
           return (
             <div
               key={l.id}
-              className={`layer-row ${l.id === doc.activeLayerId ? 'active' : ''} ${l.visible ? '' : 'hidden'} ${dropCls}`}
+              data-index={i}
+              className={`layer-row ${l.id === doc.activeLayerId && !doc.activeGroupId ? 'active' : ''} ${l.visible ? '' : 'hidden'} ${inGroup ? 'in-group' : ''} ${dropCls}`}
+              style={color ? { boxShadow: `inset 3px 0 0 ${color}` } : undefined}
               onPointerDown={(e) => {
                 select(l.id);
                 startDrag(e, l.id);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                select(l.id);
+                setMenu({ x: e.clientX, y: e.clientY, layerId: l.id });
               }}
             >
               <button
@@ -263,7 +373,63 @@ export function LayersPanel() {
           );
         })}
       </div>
+      {menu && <LayerMenu doc={doc} menu={menu} onClose={() => setMenu(null)} onRenameGroup={setRenamingGroup} />}
     </>
+  );
+}
+
+/** Правый клик по слою или папке: цвет метки, папки. */
+function LayerMenu({ doc, menu, onClose, onRenameGroup }: { doc: Doc; menu: { x: number; y: number; layerId?: string; groupId?: string }; onClose: () => void; onRenameGroup: (id: string) => void }) {
+  useEffect(() => {
+    const close = (e: PointerEvent) => !(e.target as HTMLElement).closest('.ctx-menu') && onClose();
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [onClose]);
+  const layer = menu.layerId ? doc.getLayer(menu.layerId) : null;
+  const group = doc.getGroup(menu.groupId);
+  const cur = layer ? layer.color ?? null : group?.color ?? null;
+  const setColor = (c: LabelColor | null) => {
+    if (layer) doc.setLabelColor([layer.id], c);
+    else if (group) doc.updateGroup(group.id, { color: c }, 'Цвет папки');
+    changed();
+    onClose();
+  };
+  const act = (fn: () => void) => () => {
+    fn();
+    changed();
+    onClose();
+  };
+  return (
+    <div className="ctx-menu" style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 260) }}>
+      <div className="ctx-colors">
+        <button className={`label-swatch none ${cur === null ? 'on' : ''}`} title="Без цвета" onClick={() => setColor(null)} />
+        {LABEL_COLORS.map((c) => (
+          <button key={c.id} className={`label-swatch ${cur === c.id ? 'on' : ''}`} style={{ background: c.css }} title={c.label} onClick={() => setColor(c.id)} />
+        ))}
+      </div>
+      {layer && (
+        <>
+          <button className="ctx-item" onClick={act(() => doc.groupLayers([layer.id]))}>Новая папка из слоя</button>
+          {doc.groups.filter((g) => g.id !== layer.group).map((g) => (
+            <button key={g.id} className="ctx-item" onClick={act(() => doc.moveLayerToGroup(layer.id, g.id))}>В папку «{g.name}»</button>
+          ))}
+          {layer.group && <button className="ctx-item" onClick={act(() => doc.moveLayerToGroup(layer.id, null))}>Убрать из папки</button>}
+        </>
+      )}
+      {group && (
+        <>
+          <button className="ctx-item" onClick={() => (onRenameGroup(group.id), onClose())}>Переименовать</button>
+          <button className="ctx-item" onClick={act(() => doc.updateGroup(group.id, { collapsed: !group.collapsed }, 'Свернуть папку'))}>{group.collapsed ? 'Развернуть' : 'Свернуть'}</button>
+          <button className="ctx-item" onClick={act(() => (doc.ungroup(group.id), (doc.activeGroupId = null)))}>Разгруппировать</button>
+          <button className="ctx-item danger" onClick={act(() => (doc.removeGroupWithLayers(group.id), (doc.activeGroupId = null)))}>Удалить папку со слоями</button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -276,6 +442,14 @@ export function LayersActions() {
     <>
       <button className="icon-btn" title="Новый слой (⇧⌘N)" disabled={!doc} onClick={A.newLayer}>
         <Plus size={14} />
+      </button>
+      <button
+        className="icon-btn"
+        title="Новая папка из активного слоя (⌘G); слои перетаскиваются на заголовок папки"
+        disabled={idx < 0}
+        onClick={A.groupActiveLayer}
+      >
+        <FolderPlus size={13} />
       </button>
       <button className="icon-btn" title="Дублировать" disabled={idx < 0} onClick={A.duplicateLayer}>
         <Copy size={13} />

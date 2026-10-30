@@ -71,6 +71,34 @@ export interface Layer {
   mask: HTMLCanvasElement | null;
   maskEnabled: boolean;
   effects: LayerEffects;
+  /** Цветовая метка в панели слоёв (только для наглядности). */
+  color?: LabelColor | null;
+  /** Папка (id из Doc.groups); слои одной папки идут в списке подряд. */
+  group?: string | null;
+}
+
+export type LabelColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray';
+
+export const LABEL_COLORS: { id: LabelColor; label: string; css: string }[] = [
+  { id: 'red', label: 'Красный', css: '#e5484d' },
+  { id: 'orange', label: 'Оранжевый', css: '#f76b15' },
+  { id: 'yellow', label: 'Жёлтый', css: '#ffc53d' },
+  { id: 'green', label: 'Зелёный', css: '#30a46c' },
+  { id: 'blue', label: 'Синий', css: '#3e63dd' },
+  { id: 'violet', label: 'Фиолетовый', css: '#8e4ec6' },
+  { id: 'gray', label: 'Серый', css: '#8b8d98' },
+];
+
+export const labelCss = (c: LabelColor | null | undefined) => (c ? LABEL_COLORS.find((x) => x.id === c)?.css ?? null : null);
+
+/** Папка слоёв: скрытие и непрозрачность действуют на все её слои. */
+export interface LayerGroup {
+  id: string;
+  name: string;
+  visible: boolean;
+  collapsed: boolean;
+  opacity: number;
+  color: LabelColor | null;
 }
 
 export interface ShadowFx {

@@ -7,7 +7,7 @@ import { newAtlasDoc } from './atlasDoc';
 import { largestIconPng } from './icons';
 import { isTauri, type FileFilter, type LoadedFile } from './platform';
 import { grayToMask, maskToGray } from './composite';
-import { DEFAULT_EFFECTS, hasEffects, type BlendMode, type Layer, type LayerEffects, type RGBA } from './types';
+import { DEFAULT_EFFECTS, hasEffects, LABEL_COLORS, type BlendMode, type LabelColor, type Layer, type LayerEffects, type LayerGroup, type RGBA } from './types';
 
 export const OPEN_FILTERS: FileFilter[] = [
   {
@@ -103,13 +103,22 @@ function decodePsd(file: LoadedFile): Doc {
   const doc = new Doc(file.name, psd.width, psd.height);
   const layers: Layer[] = [];
   // слои ag-psd идут снизу вверх, как и у нас; группы раскрываем с префиксом имени
-  const walk = (list: PsdLayer[], prefix: string, hidden: boolean, opacity: number) => {
+  const groups: LayerGroup[] = [];
+  const color = (c: PsdLayer['layerColor']): LabelColor | null => (LABEL_COLORS.some((x) => x.id === c) ? (c as LabelColor) : null);
+  // папки верхнего уровня становятся папками слоёв; вложенные — префиксом имени внутри папки
+  const walk = (list: PsdLayer[], prefix: string, hidden: boolean, opacity: number, group: string | null) => {
     for (const l of list) {
+      if (l.children && !group) {
+        const id = `gr_${groups.length + 1}_${Math.random().toString(36).slice(2, 7)}`;
+        groups.push({ id, name: l.name ?? 'Папка', visible: !l.hidden, collapsed: l.opened === false, opacity: l.opacity ?? 1, color: color(l.layerColor) });
+        walk(l.children, '', false, 1, id);
+        continue;
+      }
       const name = (prefix ? prefix + ' / ' : '') + (l.name ?? 'Слой');
       const isHidden = hidden || !!l.hidden;
       const op = opacity * (l.opacity ?? 1);
       if (l.children) {
-        walk(l.children, name, isHidden, op);
+        walk(l.children, name, isHidden, op, group);
         continue;
       }
       const c = doc.newLayerCanvas();
@@ -135,10 +144,13 @@ function decodePsd(file: LoadedFile): Doc {
         maskEnabled: !l.mask?.disabled,
         effects: l.effects ? effectsFromPsd(l.effects) : DEFAULT_EFFECTS,
         blend: (l.blendMode && PSD_TO_BLEND[l.blendMode]) || 'normal',
+        color: color(l.layerColor),
+        group,
       });
     }
   };
-  walk(psd.children ?? [], '', false, 1);
+  walk(psd.children ?? [], '', false, 1, null);
+  doc.groups = groups.filter((g) => layers.some((l) => l.group === g.id));
   if (!layers.length && psd.canvas) {
     const c = doc.newLayerCanvas();
     ctx2d(c).drawImage(psd.canvas, 0, 0);
@@ -239,7 +251,7 @@ function decodeTga(data: Uint8Array): HTMLCanvasElement {
 // ---------- кодирование ----------
 
 export function encodePsd(doc: Doc): Uint8Array {
-  const children: PsdLayer[] = doc.layers.map((l) => {
+  const flat: PsdLayer[] = doc.layers.map((l) => {
     const b = alphaBounds(l.canvas);
     const base: PsdLayer = {
       name: l.name,
@@ -251,9 +263,24 @@ export function encodePsd(doc: Doc): Uint8Array {
     };
     if (hasEffects(l.effects)) base.effects = effectsToPsd(l.effects);
     if (l.mask) base.mask = { left: 0, top: 0, right: doc.width, bottom: doc.height, defaultColor: 0, disabled: !l.maskEnabled, canvas: maskToGray(l.mask) };
+    if (l.color) base.layerColor = l.color;
     if (!b) return { ...base, left: 0, top: 0, canvas: createCanvas(1, 1) };
     return { ...base, left: b.x, top: b.y, canvas: cropCanvas(l.canvas, b) };
   });
+  // подряд идущие слои одной папки — папкой PSD
+  const children: PsdLayer[] = [];
+  doc.layers.forEach((l, i) => {
+    const g = doc.getGroup(l.group);
+    if (!g) return void children.push(flat[i]);
+    const last = children[children.length - 1] as (PsdLayer & { _group?: string }) | undefined;
+    if (last?._group === g.id) last.children!.push(flat[i]);
+    else {
+      const folder: PsdLayer & { _group?: string } = { name: g.name, hidden: !g.visible, opacity: g.opacity, opened: !g.collapsed, children: [flat[i]], _group: g.id };
+      if (g.color) folder.layerColor = g.color;
+      children.push(folder);
+    }
+  });
+  for (const c of children) delete (c as { _group?: string })._group;
   return writePsdUint8Array({ width: doc.width, height: doc.height, children, canvas: doc.composite() }, { generateThumbnail: true });
 }
 

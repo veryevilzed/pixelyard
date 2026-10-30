@@ -1,7 +1,7 @@
 import { alphaBounds, createCanvas, ctx2d, rgbaToCss } from './canvas';
 import { dilateAlpha } from './filters';
 import { tiled, usePatterns } from './patterns';
-import { hasEffects, type BlendMode, type GlowFx, type Layer, type LayerEffects, type Rect, type ShadowFx } from './types';
+import { hasEffects, type BlendMode, type GlowFx, type Layer, type LayerEffects, type LayerGroup, type Rect, type ShadowFx } from './types';
 
 export function blendToComposite(b: BlendMode): GlobalCompositeOperation {
   return b === 'normal' ? 'source-over' : (b as GlobalCompositeOperation);
@@ -294,6 +294,7 @@ export interface CompositeSource {
   height: number;
   layers: Layer[];
   rev: number;
+  groups?: LayerGroup[];
 }
 
 /**
@@ -308,6 +309,10 @@ export function compositeLayers(
 ) {
   const content = (l: Layer) => opts.getContent?.(l) ?? renderLayer(l, doc.rev);
   const layers = doc.layers;
+  // папки: скрытая папка прячет слои, её непрозрачность умножается на слоевую
+  const groups = new Map((doc.groups ?? []).map((g) => [g.id, g]));
+  const shown = (l: Layer) => (l.visible && (!l.group || groups.get(l.group)?.visible !== false)) || !!opts.includeHidden;
+  const alpha = (l: Layer) => l.opacity * (l.group ? groups.get(l.group)?.opacity ?? 1 : 1);
   let i = 0;
   while (i < layers.length) {
     const base = layers[i];
@@ -315,13 +320,13 @@ export function compositeLayers(
     while (j < layers.length && layers[j].clip) j++;
     const clipped = layers.slice(i + 1, j);
     i = j;
-    const baseVisible = base.visible || opts.includeHidden;
+    const baseVisible = shown(base);
     // обтравочные слои над скрытой базой тоже не видны
     if (!baseVisible) continue;
-    const visibleClipped = clipped.filter((l) => l.visible || opts.includeHidden);
+    const visibleClipped = clipped.filter(shown);
     const baseCanvas = content(base);
     if (!visibleClipped.length) {
-      ctx.globalAlpha = base.opacity;
+      ctx.globalAlpha = alpha(base);
       ctx.globalCompositeOperation = blendToComposite(base.blend);
       ctx.drawImage(baseCanvas, 0, 0);
       continue;
@@ -337,11 +342,11 @@ export function compositeLayers(
       tc.drawImage(content(c), 0, 0);
       tc.globalCompositeOperation = 'destination-in';
       tc.drawImage(shape, 0, 0);
-      g.globalAlpha = c.opacity;
+      g.globalAlpha = alpha(c);
       g.globalCompositeOperation = blendToComposite(c.blend);
       g.drawImage(t, 0, 0);
     }
-    ctx.globalAlpha = base.opacity;
+    ctx.globalAlpha = alpha(base);
     ctx.globalCompositeOperation = blendToComposite(base.blend);
     ctx.drawImage(group, 0, 0);
   }

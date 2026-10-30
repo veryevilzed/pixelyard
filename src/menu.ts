@@ -1,6 +1,7 @@
 import * as A from './actions';
 import * as P from './panes';
 import { FILTERS } from './core/filters';
+import { LABEL_COLORS } from './core/types';
 import { activeDoc, app, openDialog, setOpts, setPrefs, toast, useApp, type ToolId } from './store';
 import { changed } from './tools/base';
 import * as AT from './atlasActions';
@@ -154,6 +155,16 @@ export const MENUS: Menu[] = [
       { label: 'Новый слой', shortcut: 'Shift+Mod+N', action: A.newLayer, enabled: hasImg },
       { label: 'Дублировать слой', action: A.duplicateLayer, enabled: hasLayer },
       { label: 'Удалить слой', action: A.deleteLayer, enabled: multiLayers },
+      'sep',
+      { label: 'Новая папка из слоя', shortcut: 'Mod+G', action: A.groupActiveLayer, enabled: hasLayer },
+      { label: 'Разгруппировать', shortcut: 'Shift+Mod+G', action: A.ungroupActive, enabled: () => !!img()?.activeGroupId || !!img()?.activeLayer?.group },
+      {
+        label: 'Цвет метки',
+        submenu: [
+          { label: 'Без цвета', action: () => A.labelActive(null), enabled: hasLayer },
+          ...LABEL_COLORS.map((c) => ({ label: c.label, action: () => A.labelActive(c.id), enabled: hasLayer })),
+        ],
+      },
       'sep',
       { label: 'Новый слой из выделенного', shortcut: 'Mod+J', action: () => A.layerVia(false), enabled: hasLayer },
       { label: 'Вырезать на новый слой', shortcut: 'Shift+Mod+J', action: () => A.layerVia(true), enabled: hasLayer },

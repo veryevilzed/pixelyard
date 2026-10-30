@@ -433,6 +433,23 @@ export const deleteLayer = withDoc((d) => d.activeLayerId && d.removeLayer(d.act
 export const mergeDown = withDoc((d) => d.activeLayerId && d.mergeDown(d.activeLayerId));
 export const flatten = withDoc((d) => d.flatten());
 
+export const groupActiveLayer = withDoc((d) => {
+  const id = d.activeGroupId ? null : d.activeLayerId;
+  if (id) d.activeGroupId = d.groupLayers([id]);
+});
+export const ungroupActive = withDoc((d) => {
+  const g = d.activeGroupId ?? d.activeLayer?.group;
+  if (g) d.ungroup(g);
+  d.activeGroupId = null;
+});
+export function labelActive(color: import('./core/types').LabelColor | null) {
+  const d = activeDoc();
+  if (!d) return;
+  if (d.activeGroupId) d.updateGroup(d.activeGroupId, { color }, 'Цвет папки');
+  else if (d.activeLayerId) d.setLabelColor([d.activeLayerId], color);
+  changed();
+}
+
 export const mergeVisible = withDoc((d) => {
   const visible = d.layers.filter((l) => l.visible);
   if (visible.length < 2) return;
