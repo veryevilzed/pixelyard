@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/veryevilzed/pixelyard/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/veryevilzed/pixelyard?label=скачать&color=f97316"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-11%2B-black?logo=apple">
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
@@ -23,6 +24,13 @@
 > transform, PSD in and out. The interface is in Russian.
 
 ![PixelYard](docs/screenshots/main.jpg)
+
+## Скачать
+
+**[Последняя версия →](https://github.com/veryevilzed/pixelyard/releases/latest)** — файл `PixelYard_*_universal.dmg`:
+откройте его и перетащите PixelYard в «Программы». Сборка универсальная (Apple Silicon и Intel), macOS 11+,
+подписана Developer ID и нотаризована Apple — открывается без предупреждений.
+Что нового — в [CHANGELOG](CHANGELOG.md).
 
 ## Возможности
 
@@ -96,7 +104,7 @@
 
 ![Экспорт](docs/screenshots/export.jpg)
 
-## Установка и сборка
+## Сборка из исходников
 
 Нужны macOS 11+, [Node.js](https://nodejs.org) 20+ и [Rust](https://rustup.rs).
 

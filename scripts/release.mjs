@@ -412,6 +412,68 @@ async function manualNotary(identity) {
   return { method: 'none' };
 }
 
+// ---------- публикация на GitHub ----------
+
+/** Раздел CHANGELOG.md для версии (между «## [x.y.z]» и следующим «## »). */
+function changelogSection(version) {
+  try {
+    const text = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+    const esc = version.replace(/\./g, '\\.');
+    const m = text.match(new RegExp(`^## \\[?${esc}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |^\\[[^\\]]+\\]:|$(?![\\s\\S]))`, 'm'));
+    return m ? m[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Публикация релиза через GitHub CLI: тег, описание из CHANGELOG, файлы. */
+async function publishGithub({ version, productName, files, gitTagCreated }) {
+  const remote = sh('git', ['remote', 'get-url', 'origin']).stdout?.trim() ?? '';
+  if (!/github\.com/.test(remote)) return;
+  if (!have('gh')) {
+    info(dim('Публикация на GitHub: установите GitHub CLI (brew install gh) и войдите (gh auth login)'));
+    return;
+  }
+  if (sh('gh', ['auth', 'status']).status !== 0) {
+    warn('GitHub CLI не авторизован — выполните gh auth login, чтобы публиковать релизы отсюда');
+    return;
+  }
+  step(13, 'GitHub');
+  const tag = `v${version}`;
+  const publish = YES && saved.githubPublish !== undefined ? saved.githubPublish : await confirm(`Опубликовать релиз ${tag} на GitHub?`, saved.githubPublish ?? true);
+  saved.githubPublish = publish;
+  if (!DRY) fs.writeFileSync(SETTINGS, JSON.stringify(saved, null, 2) + '\n');
+  if (!publish) return;
+  const draft = YES ? !!saved.githubDraft : await confirm('Черновиком (опубликуете сами на сайте)?', saved.githubDraft ?? false);
+  saved.githubDraft = draft;
+  if (!DRY) fs.writeFileSync(SETTINGS, JSON.stringify(saved, null, 2) + '\n');
+
+  let notes = changelogSection(version);
+  if (!notes) {
+    warn(`В CHANGELOG.md нет раздела «## [${version}]» — в описание пойдёт короткий текст`);
+    notes = `${productName} ${version}\n\nПодписано Developer ID и нотаризовано Apple.\n\nПроверка: \`shasum -a 256 -c SHA256SUMS\``;
+  }
+  const notesFile = path.join(os.tmpdir(), `release-notes-${process.pid}.md`);
+  if (!DRY) fs.writeFileSync(notesFile, notes + '\n');
+
+  // тег — если инструмент не создал его на шаге git
+  const hasTag = sh('git', ['rev-parse', '-q', '--verify', `refs/tags/${tag}`]).status === 0;
+  if (!hasTag && !gitTagCreated) await run('git', ['tag', '-a', tag, '-m', `${productName} ${version}`]);
+  await run('git', ['push', 'origin', 'HEAD']);
+  await run('git', ['push', 'origin', tag]);
+
+  const exists = !DRY && sh('gh', ['release', 'view', tag]).status === 0;
+  if (exists) {
+    if (!(await confirm(`Релиз ${tag} уже есть. Перезалить файлы?`, true))) return;
+    await run('gh', ['release', 'upload', tag, ...files, '--clobber']);
+  } else {
+    await run('gh', ['release', 'create', tag, ...files, '--title', `${productName} ${version}`, '--notes-file', notesFile, ...(draft ? ['--draft'] : [])]);
+  }
+  if (!DRY) fs.rmSync(notesFile, { force: true });
+  const url = sh('gh', ['release', 'view', tag, '--json', 'url', '-q', '.url']).stdout?.trim();
+  ok(`Релиз ${draft ? '(черновик) ' : ''}на GitHub${url ? `: ${url}` : ''}`);
+}
+
 // ---------- шаги ----------
 
 async function main() {
@@ -533,6 +595,7 @@ async function main() {
   info(`Подпись:      ${identity ? identity.name : red('нет')}`);
   info(`Нотаризация:  ${notary.method === 'none' ? yellow('нет') : { apikey: 'ключ API организации', profile: `профиль «${notary.profile}»`, appleid: 'Apple ID' }[notary.method]}`);
   info(`Результат:    release/${version}/`);
+  if (have('gh') && /github\.com/.test(sh('git', ['remote', 'get-url', 'origin']).stdout ?? '')) info(`GitHub:       спрошу в конце, публиковать ли релиз v${version}`);
   if (!YES && !(await confirm('Собираем?', true))) {
     rl.close();
     return;
@@ -670,6 +733,9 @@ async function main() {
     await run('git', ['tag', '-a', `v${version}`, '-m', `${productName} ${version}`]);
     info(`Отправить: git push && git push origin v${version}`);
   }
+
+  // 13. GitHub
+  await publishGithub({ version, productName, files: [dmgPath, zipPath, path.join(outDir, 'SHA256SUMS')], gitTagCreated: gitTag });
 
   console.log(`\n${green(bold('Готово.'))} Файлы в ${bold(path.relative(ROOT, outDir) + '/')}:`);
   console.log(`    ${path.basename(dmgPath)}  — для раздачи пользователям`);
