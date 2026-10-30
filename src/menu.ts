@@ -60,6 +60,8 @@ export const MENUS: Menu[] = [
       { label: 'Экспорт…', shortcut: 'Shift+Mod+E', action: () => openDialog({ kind: 'export' }), enabled: hasDoc },
       { label: 'Экспорт слоёв по отдельности…', action: () => openDialog({ kind: 'export', source: 'layers' }), enabled: hasDoc },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
+      { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },
+      { label: 'Растровый шрифт (BMFont)…', shortcut: 'Alt+Mod+F', action: () => openDialog({ kind: 'bmfont' }) },
       { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasDoc },
       'sep',
       { label: 'Закрыть', shortcut: 'Mod+W', action: () => { const d = activeDoc(); if (d) void A.closeDoc(d.id); }, enabled: hasDoc },
@@ -227,6 +229,8 @@ export const MENUS: Menu[] = [
       'sep',
       { label: 'Удалить все слайсы', action: A.clearSlices, enabled: hasSlices },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
+      { label: 'Упаковать слайсы в спрайтшит…', action: () => openDialog({ kind: 'spritesheet', source: 'slices' }), enabled: hasSlices },
+      { label: 'Растровый шрифт (BMFont)…', action: () => openDialog({ kind: 'bmfont' }) },
     ],
   },
   {

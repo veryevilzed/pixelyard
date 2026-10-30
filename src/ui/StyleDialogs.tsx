@@ -238,10 +238,11 @@ export function LayerStyleDialog() {
         <div className="fx-list">
           <div className={`head ${sel === 'blending' ? 'on' : ''}`} onClick={() => setSel('blending')}>Параметры наложения</div>
           {FX_LIST.map((f) => (
-            <label key={f.key} className={sel === f.key ? 'on' : ''} onClick={() => setSel(f.key)}>
+            // div, а не label: клик по названию выбирает раздел, галочка — только по самой галочке
+            <div key={f.key} className={`fx-item ${sel === f.key ? 'on' : ''}`} onClick={() => setSel(f.key)}>
               <input type="checkbox" checked={fx[f.key].enabled} onChange={(e) => toggle(f.key, e.target.checked)} onClick={(e) => e.stopPropagation()} />
               {f.label}
-            </label>
+            </div>
           ))}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

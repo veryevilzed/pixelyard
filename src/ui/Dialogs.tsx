@@ -7,11 +7,12 @@ import type { RGBA, Slice } from '../core/types';
 import { formatShortcut, MENUS, type MenuEntry } from '../menu';
 import { isTauri } from '../core/platform';
 import { APP_NAME, APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
-import { activeDoc, closeDialog, setPrefs, toast, useApp, type DialogState } from '../store';
+import { activeDoc, closeDialog, openDialog, setPrefs, toast, useApp, type DialogState } from '../store';
 import { changed, requestRender } from '../tools/base';
 import { Check, ColorField, NumberField, Seg, TextInput } from './controls';
 import { ColorRangeDialog, CutStepDialog, FillDialog, LayerStyleDialog, NewGuideDialog } from './StyleDialogs';
 import { CurvesDialog } from './CurvesDialog';
+import { BMFontDialog, SpriteSheetDialog } from './PackDialogs';
 
 export function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: () => void; seeThrough?: boolean; width?: number }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
@@ -389,6 +390,8 @@ function ExportDialog({ d }: { d: Extract<DialogState, { kind: 'export' }> }) {
   const [o, setO] = useState<ExportOptions>(() => ({
     ...DEFAULT_EXPORT,
     ...stored,
+    // раньше «атлас» был вариантом вывода — теперь это отдельный диалог «Спрайтшит»
+    output: stored.output === 'zip' ? 'zip' : 'folder',
     source: initialSource,
     ids: d.ids ?? (initialSource === 'slices' ? doc.slices.map((s) => s.id) : doc.layers.filter((l) => l.visible).map((l) => l.id)),
   }));
@@ -474,17 +477,12 @@ function ExportDialog({ d }: { d: Extract<DialogState, { kind: 'export' }> }) {
         </Row>
         <Row label=""><Check label="Сглаживание при масштабировании (выкл. для пиксель-арта)" checked={o.smoothScale} onChange={(smoothScale) => set({ smoothScale })} /></Row>
         <Row label="Куда">
-          <Seg value={o.output} onChange={(output) => set({ output })} options={[{ id: 'folder', label: 'В папку' }, { id: 'zip', label: 'ZIP-архив' }, { id: 'atlas', label: 'Атлас (спрайтшит)' }]} />
+          <Seg value={o.output} onChange={(output) => set({ output })} options={[{ id: 'folder', label: 'В папку' }, { id: 'zip', label: 'ZIP-архив' }]} />
+          <button className="btn" title="Упаковать выбранное в один атлас с описанием (JSON, Spine, Starling, Cocos, свой формат…)" onClick={() => openDialog({ kind: 'spritesheet', source: o.source === 'merged' ? undefined : o.source, ids: o.ids })}>
+            Упаковать в спрайтшит…
+          </button>
         </Row>
-        {o.output === 'atlas' ? (
-          <Row label="Атлас">
-            <NumberField label="Макс. размер" value={o.atlasMaxSize} min={64} max={16384} onChange={(atlasMaxSize) => set({ atlasMaxSize })} />
-            <NumberField label="Зазор" value={o.atlasSpacing} min={0} max={64} onChange={(atlasSpacing) => set({ atlasSpacing })} />
-            <span className="note">+ JSON (TexturePacker Hash)</span>
-          </Row>
-        ) : (
-          <Row label=""><Check label="JSON с координатами (и 9-slice)" checked={o.json} onChange={(json) => set({ json })} /></Row>
-        )}
+        <Row label=""><Check label="JSON с координатами (и 9-slice)" checked={o.json} onChange={(json) => set({ json })} /></Row>
         <Row label="Префикс файлов"><TextInput value={o.prefix} onChange={(prefix) => set({ prefix })} width={160} placeholder="без префикса" /></Row>
       </div>
     </Modal>
@@ -596,7 +594,7 @@ export function Dialogs() {
   const d = useApp((s) => s.dialog);
   useApp((s) => s.tick);
   if (!d) return null;
-  const needsDoc = d.kind !== 'new' && d.kind !== 'shortcuts' && d.kind !== 'about' && d.kind !== 'grid-settings';
+  const needsDoc = !['new', 'shortcuts', 'about', 'grid-settings', 'spritesheet', 'bmfont'].includes(d.kind);
   if (needsDoc && !activeDoc()) return null;
   switch (d.kind) {
     case 'new': return <NewDialog />;
@@ -614,6 +612,8 @@ export function Dialogs() {
     case 'color-range': return <ColorRangeDialog />;
     case 'cut-step': return <CutStepDialog />;
     case 'new-guide': return <NewGuideDialog />;
+    case 'spritesheet': return <SpriteSheetDialog d={d} />;
+    case 'bmfont': return <BMFontDialog />;
     case 'curves': return activeDoc()?.activeLayer ? <CurvesDialog /> : null;
     case 'fill': return activeDoc()?.activeLayer ? <FillDialog /> : null;
   }

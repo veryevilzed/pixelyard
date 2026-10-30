@@ -138,6 +138,8 @@ export type DialogState =
   | { kind: 'cut-step' }
   | { kind: 'fill' }
   | { kind: 'curves' }
+  | { kind: 'spritesheet'; source?: 'layers' | 'slices' | 'files'; ids?: string[] }
+  | { kind: 'bmfont' }
   | { kind: 'new-guide' }
   | { kind: 'shortcuts' }
   | { kind: 'about' };

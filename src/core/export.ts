@@ -7,7 +7,7 @@ import { ensureDir, isTauri, joinPath, pickFolder, saveFileAs, writePath } from 
 import type { NineSlice, Rect } from './types';
 
 export type ExportSource = 'layers' | 'slices' | 'merged';
-export type ExportOutput = 'folder' | 'zip' | 'atlas';
+export type ExportOutput = 'folder' | 'zip';
 
 export interface ExportOptions {
   source: ExportSource;
@@ -24,8 +24,6 @@ export interface ExportOptions {
   json: boolean;
   output: ExportOutput;
   prefix: string;
-  atlasMaxSize: number;
-  atlasSpacing: number;
 }
 
 export const DEFAULT_EXPORT: ExportOptions = {
@@ -41,8 +39,6 @@ export const DEFAULT_EXPORT: ExportOptions = {
   json: false,
   output: 'folder',
   prefix: '',
-  atlasMaxSize: 4096,
-  atlasSpacing: 2,
 };
 
 interface Item {
@@ -143,16 +139,7 @@ export async function runExport(doc: Doc, o: ExportOptions, onProgress?: (done: 
     await new Promise((r) => setTimeout(r, 0));
   };
 
-  if (o.output === 'atlas') {
-    for (const s of scales) {
-      const packed = packAtlas(items.map((it) => scaled(it.canvas, s, o.smoothScale)), o.atlasMaxSize, o.atlasSpacing);
-      const base = `${safeFileName(o.prefix || fileStem(doc.name))}${scaleSuffix(s)}`;
-      files[`${base}.${ext}`] = await encodeCanvas(packed.canvas, o.format, o.quality);
-      files[`${base}.json`] = jsonBytes(atlasJson(doc, items, packed.rects, `${base}.${ext}`, packed.canvas, s));
-      done += items.length;
-      onProgress?.(done, total);
-    }
-  } else {
+  {
     const meta: unknown[] = [];
     for (const it of items) {
       const entry: Record<string, unknown> = {
@@ -184,10 +171,15 @@ export async function runExport(doc: Doc, o: ExportOptions, onProgress?: (done: 
 }
 
 async function writeOutput(doc: Doc, files: Record<string, Uint8Array>, asZip: boolean): Promise<ExportResult | null> {
+  return writeFiles(files, fileStem(doc.name), asZip);
+}
+
+/** Пишет набор файлов в выбранную папку (Tauri) или одним ZIP; в браузере несколько файлов — всегда ZIP. */
+export async function writeFiles(files: Record<string, Uint8Array>, zipStem: string, asZip: boolean): Promise<ExportResult | null> {
   const names = Object.keys(files);
-  if (asZip) {
+  if (asZip || (!isTauri && names.length > 1)) {
     const zip = zipSync(files, { level: 0 }); // PNG/JPG уже сжаты
-    const path = await saveFileAs(`${fileStem(doc.name)}.zip`, zip, [{ name: 'ZIP', extensions: ['zip'] }]);
+    const path = await saveFileAs(`${zipStem}.zip`, zip, [{ name: 'ZIP', extensions: ['zip'] }]);
     return path ? { files: names.length, target: path } : null;
   }
   if (!isTauri) {
@@ -204,66 +196,3 @@ async function writeOutput(doc: Doc, files: Record<string, Uint8Array>, asZip: b
 }
 
 const jsonBytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v, null, 2));
-
-// ---------- упаковка атласа ----------
-
-interface Packed {
-  canvas: HTMLCanvasElement;
-  rects: Rect[];
-}
-
-/**
- * Полочная упаковка (shelf) по убыванию высоты: просто и предсказуемо,
- * для спрайтов похожих размеров плотность близка к MaxRects.
- */
-export function packAtlas(canvases: HTMLCanvasElement[], maxSize: number, spacing: number): Packed {
-  const order = canvases.map((_c, i) => i).sort((a, b) => canvases[b].height - canvases[a].height || canvases[b].width - canvases[a].width);
-  const area = canvases.reduce((s, c) => s + (c.width + spacing) * (c.height + spacing), 0);
-  const widest = Math.max(...canvases.map((c) => c.width));
-  // ширина — степень двойки, начиная с ~sqrt(площади)
-  let width = 1;
-  while (width < Math.max(widest, Math.sqrt(area))) width *= 2;
-  width = Math.min(width, maxSize);
-  const rects: Rect[] = new Array(canvases.length);
-  let x = 0, y = 0, shelf = 0;
-  for (const i of order) {
-    const c = canvases[i];
-    if (x + c.width > width) {
-      x = 0;
-      y += shelf + spacing;
-      shelf = 0;
-    }
-    rects[i] = { x, y, w: c.width, h: c.height };
-    x += c.width + spacing;
-    shelf = Math.max(shelf, c.height);
-  }
-  const usedH = y + shelf;
-  let height = 1;
-  while (height < usedH) height *= 2;
-  if (width > maxSize || height > maxSize) throw new Error(`Спрайты не помещаются в атлас ${maxSize}×${maxSize}`);
-  const out = createCanvas(width, height);
-  const ctx = ctx2d(out);
-  canvases.forEach((c, i) => ctx.drawImage(c, rects[i].x, rects[i].y));
-  return { canvas: out, rects };
-}
-
-/** JSON в формате TexturePacker «JSON (Hash)» — понимают Phaser, Pixi, Cocos и др. */
-function atlasJson(doc: Doc, items: Item[], rects: Rect[], image: string, atlas: HTMLCanvasElement, scale: number) {
-  const frames: Record<string, unknown> = {};
-  items.forEach((it, i) => {
-    const r = rects[i];
-    const srcW = Math.round(it.source.w * scale), srcH = Math.round(it.source.h * scale);
-    frames[it.name] = {
-      frame: r,
-      rotated: false,
-      trimmed: r.w !== srcW || r.h !== srcH,
-      spriteSourceSize: { x: Math.round(it.trimmed.x * scale), y: Math.round(it.trimmed.y * scale), w: r.w, h: r.h },
-      sourceSize: { w: srcW, h: srcH },
-      ...(it.nine ? { nineSlice: it.nine } : {}),
-    };
-  });
-  return {
-    frames,
-    meta: { app: 'PixelYard', version: '1.0', image, format: 'RGBA8888', size: { w: atlas.width, h: atlas.height }, scale: String(scale), source: doc.name },
-  };
-}

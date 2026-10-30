@@ -719,7 +719,7 @@ label.check {
 }
 .modal {
   min-width: 380px;
-  max-width: 720px;
+  max-width: 94vw;
   max-height: 86vh;
   display: flex;
   flex-direction: column;
@@ -920,14 +920,15 @@ label.check {
   background: var(--bg1);
   overflow: hidden;
 }
-.fx-list label {
+.fx-list .fx-item {
+  cursor: default;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line-soft);
 }
-.fx-list label.on {
+.fx-list .fx-item.on {
   background: var(--accent-soft);
 }
 .fx-list .head {
@@ -1142,4 +1143,131 @@ label.check {
   font-weight: 400;
   color: var(--text-faint);
   font-size: 11px;
+}
+/* элементы панели опций не сжимаются — при нехватке места панель прокручивается */
+.optionsbar > * {
+  flex-shrink: 0;
+}
+
+/* ---------- спрайтшиты и шрифты ---------- */
+.pack-layout {
+  display: grid;
+  grid-template-columns: 470px 1fr;
+  gap: 16px;
+  min-height: 560px;
+}
+.pack-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.pack-settings .range-row {
+  grid-template-columns: 120px 1fr 70px;
+}
+.pack-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.atlas-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 260px;
+}
+.atlas-preview {
+  position: relative;
+  flex: 1;
+  background: #121214;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.atlas-preview canvas,
+.sample-box canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.data-preview {
+  margin: 0;
+  height: 180px;
+  overflow: auto;
+  padding: 8px;
+  font: 11px ui-monospace, Menlo, monospace;
+  color: var(--text-dim);
+  background: #121214;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: pre;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.data-preview.small {
+  height: 120px;
+}
+.template-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg1);
+}
+.template-text,
+.chars-input,
+.sample-input {
+  width: 100%;
+  min-height: 140px;
+  padding: 6px;
+  font: 11px ui-monospace, Menlo, monospace;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  resize: vertical;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.chars-input {
+  min-height: 54px;
+  font-size: 14px;
+}
+.sample-input {
+  min-height: 44px;
+  flex: 1;
+  font-family: inherit;
+  font-size: 12px;
+}
+.sample-box {
+  position: relative;
+  height: 130px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.section-title {
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+code {
+  font: 11px ui-monospace, Menlo, monospace;
+  color: #9cdcfe;
+}
+/* строки списков не сжимаются — список прокручивается */
+.panel-body.list > * {
+  flex-shrink: 0;
 }
