@@ -15,8 +15,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
-  createDeveloperIdCert, importP12, installKey, keyIdFromPath, KEYS_PAGE, listDeveloperIdCerts, loadTeams, localIdentities,
-  saveTeams, usableIdentities, verifyTeam,
+  CERT_ADD_PAGE, createDeveloperIdCert, downloadedCer, importCerWithKey, importP12, installKey, keyIdFromPath, KEYS_PAGE,
+  listDeveloperIdCerts, loadTeams, localIdentities, pendingKeys, prepareCsr, saveTeams, usableIdentities, verifyTeam,
 } from './apple.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -266,33 +266,7 @@ async function teamIdentity(team) {
     const remote = await listDeveloperIdCerts(team);
     if (remote.length) warn(`У организации есть сертификаты Developer ID (${remote.length}), но закрытых ключей к ним на этом Mac нет`);
     else warn('У организации ещё нет сертификата Developer ID Application');
-    const how = await choose('Что сделать?', [
-      { label: 'Выпустить новый сертификат автоматически', value: 'create', hint: 'ключ создастся в связке ключей этого Mac' },
-      { label: 'Импортировать .p12', value: 'p12', hint: 'если сертификат уже есть на другом Mac' },
-      { label: 'Отмена', value: 'cancel' },
-    ]);
-    if (how === 'cancel') fail('Отменено');
-    if (how === 'p12') {
-      const p12 = await ask('Путь к .p12', '', { validate: exists });
-      try {
-        importP12(p12, await askSecret('Пароль от .p12 (ввод скрыт)'));
-      } catch (e) {
-        fail(`Не удалось импортировать: ${e.message}`);
-      }
-      const after = await usableIdentities(team);
-      if (!after.length) fail('Этот .p12 не относится к выбранной организации');
-      identity = after[0];
-    } else {
-      const email = await ask('Email в сертификате', sh('git', ['config', 'user.email']).stdout?.trim() ?? '');
-      try {
-        identity = await createDeveloperIdCert(team, { email, commonName: `${team.name} Developer ID` }, ok);
-      } catch (e) {
-        fail(e.message);
-      }
-      warn('Закрытый ключ сертификата есть только в связке ключей этого Mac.');
-      info('Для сборки на другом Mac: «Связка ключей» → «Мои сертификаты» → сертификат → «Экспортировать» (.p12).');
-      info('macOS при первой подписи спросит доступ к ключу — нажмите «Всегда разрешать».');
-    }
+    identity = await obtainCertificate(team);
   }
   if (identity.team && team.teamId !== identity.team) {
     team.teamId = identity.team;
@@ -300,6 +274,88 @@ async function teamIdentity(team) {
   }
   ok(identity.name);
   return identity;
+}
+
+/** Как получить Developer ID, если на этом Mac его нет: меню повторяется до успеха или отмены. */
+async function obtainCertificate(team) {
+  const email = () => sh('git', ['config', 'user.email']).stdout?.trim() ?? '';
+  for (;;) {
+    const pending = pendingKeys();
+    const options = [
+      ...(pending.length ? [{ label: 'Завершить выпуск: подключить скачанный .cer', value: 'cer', hint: 'запрос (CSR) уже создан раньше' }] : []),
+      ...(!team.devIdForbidden ? [{ label: 'Выпустить автоматически через API', value: 'create', hint: 'сработает, если ключ создан владельцем аккаунта' }] : []),
+      { label: 'Выпустить через сайт Apple', value: 'web', hint: 'вход на developer.apple.com под владельцем аккаунта, 3 клика' },
+      { label: 'Импортировать .p12', value: 'p12', hint: 'если сертификат прислали или он есть на другом Mac' },
+      { label: 'Проверить снова', value: 'recheck', hint: 'если сертификат уже выпустили в Xcode или на сайте' },
+      { label: 'Отмена', value: 'cancel' },
+    ];
+    const how = await choose('Как получить сертификат?', options, 0);
+    try {
+      if (how === 'cancel') fail('Отменено');
+      if (how === 'create') {
+        const id = await createDeveloperIdCert(team, { email: await ask('Email в сертификате', email()), commonName: `${team.name} Developer ID` }, ok);
+        keyWarning();
+        return id;
+      }
+      if (how === 'web') {
+        const { keyPath, csrPath } = prepareCsr({ email: await ask('Email в сертификате', email()), commonName: `${team.name} Developer ID` });
+        ok(`Запрос на сертификат: ${csrPath.replace(os.homedir(), '~')}`);
+        info(bold('На сайте Apple (под владельцем аккаунта):'));
+        info('1. Developer ID Application → Continue');
+        info('2. Profile Type: G2 Sub-CA → Choose File → выберите файл запроса (он на рабочем столе) → Continue');
+        info('3. Download — сертификат скачается в «Загрузки»');
+        sh('open', [CERT_ADD_PAGE]);
+        sh('open', ['-R', csrPath]);
+        await question(`    ${dim('Нажмите Enter, когда .cer скачан…')}`);
+        const cer = await ask('Путь к скачанному .cer', downloadedCer(), { validate: exists });
+        const id = await importCerWithKey(cer, keyPath, ok);
+        fs.rmSync(csrPath, { force: true });
+        keyWarning();
+        return id;
+      }
+      if (how === 'cer') {
+        const cer = await ask('Путь к скачанному .cer', downloadedCer(), { validate: exists });
+        // к сертификату подойдёт только один из ожидающих ключей — пробуем по очереди
+        let lastErr = null;
+        for (const keyPath of pending) {
+          try {
+            const id = await importCerWithKey(cer, keyPath, ok);
+            keyWarning();
+            return id;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        throw lastErr ?? new Error('Нет подходящего ключа');
+      }
+      if (how === 'p12') {
+        const p12 = await ask('Путь к .p12', '', { validate: exists });
+        importP12(p12, await askSecret('Пароль от .p12 (ввод скрыт)'));
+        const after = await usableIdentities(team);
+        if (after.length) return after[0];
+        warn('Этот .p12 не относится к выбранной организации');
+        continue;
+      }
+      if (how === 'recheck') {
+        const after = await usableIdentities(team);
+        if (after.length) return after[0];
+        warn('Сертификат Developer ID этой организации в связке ключей пока не найден');
+      }
+    } catch (e) {
+      if (e.forbidden) {
+        // запоминаем: этой организации автоматический выпуск больше не предлагаем
+        team.devIdForbidden = true;
+        updateTeam(team);
+      }
+      warn(e.message);
+    }
+  }
+}
+
+function keyWarning() {
+  warn('Закрытый ключ сертификата есть только в связке ключей этого Mac.');
+  info('Для сборки на другом Mac: «Связка ключей» → «Мои сертификаты» → сертификат → «Экспортировать» (.p12).');
+  info('macOS при первой подписи спросит доступ к ключу — нажмите «Всегда разрешать».');
 }
 
 /** Ручной режим: сертификат из связки ключей или импорт .p12. */

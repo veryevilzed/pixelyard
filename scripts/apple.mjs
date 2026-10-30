@@ -193,11 +193,13 @@ export async function createDeveloperIdCert(team, { email, commonName = 'Develop
     }
     if (!created) {
       if (lastErr?.status === 403) {
-        throw new Error(
-          'Apple не разрешила этому ключу выпускать сертификаты Developer ID. Обычно это может только владелец аккаунта ' +
-            '(Account Holder): создайте ключ API от его имени с ролью Admin или выпустите сертификат в Xcode → Settings → Accounts → Manage Certificates.\n' +
+        const err = new Error(
+          'Apple выдаёт Developer ID только владельцу аккаунта (Account Holder), а ключам API организации — запрещает. ' +
+            'Выпустите сертификат один раз через сайт Apple (вход владельца) или в Xcode — дальше всё снова автоматически.\n' +
             `Ответ Apple: ${lastErr.message}`,
         );
+        err.forbidden = true;
+        throw err;
       }
       throw lastErr ?? new Error('Не удалось выпустить сертификат');
     }
@@ -216,6 +218,84 @@ export async function createDeveloperIdCert(team, { email, commonName = 'Develop
     if (!id) throw new Error('Сертификат импортирован, но macOS не считает его действительным — проверьте промежуточные сертификаты Apple');
     log(`Выпущен и установлен: ${id.name}`);
     return { ...id, expires: created.data.attributes.expirationDate, certId: created.data.id };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------- выпуск через сайт Apple (для владельца аккаунта) ----------
+
+/**
+ * Developer ID Apple выдаёт только владельцу аккаунта (Account Holder) — ключам API
+ * организации это запрещено. Обходной путь без Xcode: готовим ключ и CSR, владелец
+ * загружает CSR на developer.apple.com и скачивает .cer, а мы соединяем их в связке.
+ */
+export const CERT_ADD_PAGE = 'https://developer.apple.com/account/resources/certificates/add';
+export const PENDING_DIR = path.join(os.homedir(), '.config', 'apple-signing', 'pending');
+
+/** Создаёт закрытый ключ (ждёт .cer в PENDING_DIR, права 600) и CSR для загрузки на сайт. */
+export function prepareCsr({ email, commonName = 'Developer ID', csrDir = path.join(os.homedir(), 'Desktop') } = {}) {
+  fs.mkdirSync(PENDING_DIR, { recursive: true, mode: 0o700 });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const keyPath = path.join(PENDING_DIR, `devid-${stamp}.key`);
+  const csrPath = path.join(csrDir, `DeveloperID-${stamp}.certSigningRequest`);
+  const subj = `/CN=${commonName.replace(/[/=]/g, ' ')}${email ? `/emailAddress=${email}` : ''}`;
+  const r = sh(OPENSSL, ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', csrPath, '-subj', subj]);
+  if (r.status !== 0) throw new Error(`openssl req: ${r.stderr}`);
+  fs.chmodSync(keyPath, 0o600);
+  return { keyPath, csrPath };
+}
+
+/** Ключи, ожидающие свой .cer (если прошлый запуск прервался после создания CSR). */
+export function pendingKeys() {
+  try {
+    return fs.readdirSync(PENDING_DIR).filter((f) => f.endsWith('.key')).map((f) => path.join(PENDING_DIR, f)).sort().reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** Самый свежий скачанный сертификат Developer ID в «Загрузках». */
+export function downloadedCer() {
+  const dir = path.join(os.homedir(), 'Downloads');
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => /\.cer$/i.test(f) && /developer|devid/i.test(f))
+      .map((f) => ({ f: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)[0]?.f ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Соединяет скачанный .cer с ожидающим ключом, импортирует в связку, удаляет ключ из pending. */
+export async function importCerWithKey(cerPath, keyPath, log = () => {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devid-'));
+  try {
+    const cer = cerPath.replace(/^~/, os.homedir());
+    const der = fs.readFileSync(cer);
+    const certPem = path.join(dir, 'cert.pem'), p12 = path.join(dir, 'id.p12');
+    // .cer с сайта Apple — DER; на всякий случай принимаем и PEM
+    const isPem = der.toString('utf8', 0, 30).includes('BEGIN CERTIFICATE');
+    const conv = sh(OPENSSL, ['x509', '-inform', isPem ? 'PEM' : 'DER', '-in', cer, '-out', certPem]);
+    if (conv.status !== 0) throw new Error(`Это не сертификат: ${conv.stderr.trim()}`);
+    // ключ должен подходить к сертификату — сравниваем открытые части
+    const pubCert = sh(OPENSSL, ['x509', '-in', certPem, '-noout', '-pubkey']).stdout;
+    const pubKey = sh(OPENSSL, ['rsa', '-in', keyPath, '-pubout']).stdout;
+    if (!pubCert || pubCert.trim() !== pubKey.trim()) throw new Error('Сертификат выпущен не по этому CSR — закрытый ключ к нему не подходит');
+    const pass = crypto.randomBytes(12).toString('hex');
+    const e = sh(OPENSSL, ['pkcs12', '-export', '-inkey', keyPath, '-in', certPem, '-out', p12, '-passout', `pass:${pass}`]);
+    if (e.status !== 0) throw new Error(`openssl pkcs12: ${e.stderr}`);
+    await ensureIntermediates(log);
+    const imp = sh('security', ['import', p12, '-k', KEYCHAIN, '-P', pass, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security', '-T', '/usr/bin/productsign']);
+    if (imp.status !== 0) throw new Error(`Импорт в связку ключей: ${imp.stderr.trim()}`);
+    const pemDer = sh(OPENSSL, ['x509', '-in', certPem, '-outform', 'DER'], { encoding: 'buffer' }).stdout;
+    const hash = sha1(pemDer);
+    const id = localIdentities().find((i) => i.hash === hash);
+    if (!id) throw new Error('Сертификат импортирован, но macOS не считает его действительным — проверьте промежуточные сертификаты Apple');
+    fs.rmSync(keyPath, { force: true });
+    log(`Установлен: ${id.name}`);
+    return id;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
