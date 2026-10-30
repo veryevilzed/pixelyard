@@ -2,7 +2,8 @@ import { alphaBounds, canvasToBlob, cloneCanvas, createCanvas, cropCanvas, ctx2d
 import { Doc } from './core/doc';
 import { FILTERS, type Params } from './core/filters';
 import { decodeFile, decodeToCanvas, encodeCanvas, encodePsd, fileStem, formatFromName, OPEN_FILTERS } from './core/io';
-import { baseName, confirmDialog, isTauri, openFiles, saveFileAs, writePath, type LoadedFile } from './core/platform';
+import { baseName, confirmDialog, isTauri, openFiles, readPath, saveFileAs, writePath, type LoadedFile } from './core/platform';
+import { importFnt, parseFnt, saveFont } from './core/fontLibrary';
 import { nextZoom, RULER, zoomAt } from './core/render';
 import {
   combineSelection, featherSelection, growSelection, invertSelection, maskedCopy, selectAll, selectionFromAlpha, selectionFromMask, blendThroughSelection,
@@ -1122,4 +1123,34 @@ export function fitMode(mode: FitMode) {
   const kw = (a.w - pad * 2) / d.width, kh = (a.h - pad * 2) / d.height;
   const z = mode === 'fit' ? Math.min(kw, kh) : mode === 'fill' ? Math.max(kw, kh) : mode === 'width' ? kw : kh;
   setZoomCentered(d, Math.min(64, Math.max(0.02, z)));
+}
+
+// ---------- растровые шрифты ----------
+
+/** Открыть BMFont (.fnt + страницы PNG): в Tauri страницы берутся из той же папки, в браузере — выбрать вместе. */
+export async function importBitmapFont() {
+  const files = await openFiles([{ name: 'BMFont', extensions: ['fnt', 'xml', 'png', 'webp', 'jpg', 'jpeg'] }]);
+  const fnt = files.find((f) => /\.(fnt|xml)$/i.test(f.name));
+  if (!fnt) return files.length ? toast('Выберите файл .fnt (и страницы-картинки, если их просят)', 'error') : undefined;
+  await withBusy('Открытие шрифта…', async () => {
+    const text = new TextDecoder().decode(fnt.data);
+    const images = files.filter((f) => f !== fnt).map((f) => ({ name: f.name, data: f.data }));
+    if (isTauri && fnt.path) {
+      // недостающие страницы — рядом с .fnt
+      const dir = fnt.path.replace(/[\\/][^\\/]*$/, '');
+      for (const page of parseFnt(text).pages) {
+        if (images.some((i) => i.name.toLowerCase() === baseName(page).toLowerCase())) continue;
+        try {
+          const f = await readPath(`${dir}/${page}`);
+          images.push({ name: f.name, data: f.data });
+        } catch {
+          /* сообщит importFnt */
+        }
+      }
+    }
+    const font = await importFnt({ name: fnt.name, text }, images);
+    saveFont(font);
+    setOpts({ textFont: `bmfont:${font.id}` });
+    toast(`Шрифт «${font.name}» открыт: ${font.font?.glyphs.length ?? 0} символов — выбран в инструменте «Текст»`);
+  });
 }

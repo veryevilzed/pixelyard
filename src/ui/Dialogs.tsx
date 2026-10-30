@@ -615,7 +615,7 @@ export function Dialogs() {
     case 'cut-step': return <CutStepDialog />;
     case 'new-guide': return <NewGuideDialog />;
     case 'spritesheet': return <SpriteSheetDialog d={d} />;
-    case 'bmfont': return <BMFontDialog />;
+    case 'bmfont': return <BMFontDialog key={d.fontId ?? 'new'} fontId={d.fontId} />;
     case 'icon': return <IconDialog />;
     case 'pdf-import': return <PdfImportDialog file={d.file} />;
     case 'pdf-export': return <PdfExportDialog />;

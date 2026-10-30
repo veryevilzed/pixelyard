@@ -6,7 +6,9 @@ import { tiled } from '../core/patterns';
 import { compositeForView, nextZoom, toScreen, zoomAt } from '../core/render';
 import { hardenMask, maskedCopy } from '../core/selection';
 import type { Point, RGBA } from '../core/types';
-import { app, setBg, setFg } from '../store';
+import { app, setBg, setFg, toast } from '../store';
+import { drawBitmapText, fontGlyphs, useFonts } from '../core/fontLibrary';
+import type { RenderedFont } from '../core/bmfont';
 import { changed, constrain45, editableLayer, infoLabel, requestRender, snapPoint, type Tool } from './base';
 import { sampleColor } from './sample';
 
@@ -260,9 +262,19 @@ export const shapeTool: Tool = {
 
 export const useTextEdit = create<{ at: Point | null; value: string }>(() => ({ at: null, value: '' }));
 
+/** id растрового шрифта, если в «Тексте» выбран BMFont (значение шрифта «bmfont:<id>»). */
+export const bitmapFontId = (font = app().opts.textFont) => (font.startsWith('bmfont:') ? font.slice(7) : null);
+
 export function textFont() {
   const o = app().opts;
-  return `${o.textItalic ? 'italic ' : ''}${o.textBold ? 'bold ' : ''}${o.textSize}px ${o.textFont}`;
+  // для растрового шрифта поле ввода показывает системный шрифт, а сам текст — предпросмотр глифами
+  const family = bitmapFontId() ? '-apple-system, sans-serif' : o.textFont;
+  return `${o.textItalic ? 'italic ' : ''}${o.textBold ? 'bold ' : ''}${o.textSize}px ${family}`;
+}
+
+function bitmapOpts(f: RenderedFont) {
+  const o = app().opts;
+  return { scale: o.textSize / Math.max(1, f.size), letterSpacing: 0, tint: o.textBmTint ? app().fg : null, smooth: o.textAntialias };
 }
 
 export function commitText(doc: Doc) {
@@ -272,6 +284,16 @@ export function commitText(doc: Doc) {
   const o = app().opts;
   const c = createCanvas(doc.width, doc.height);
   const ctx = ctx2d(c);
+  const bm = bitmapFontId();
+  if (bm) {
+    void fontGlyphs(bm).then((f) => {
+      if (!f) return toast('Растровый шрифт не найден в библиотеке', 'error');
+      drawBitmapText(ctx, f, value, at.x, at.y, bitmapOpts(f));
+      doc.addLayer(doc.makeLayer(value.trim().split('\n')[0].slice(0, 32), c), 'Текст');
+      changed();
+    });
+    return;
+  }
   ctx.font = textFont();
   ctx.fillStyle = rgbaToCss(app().fg);
   ctx.textBaseline = 'top';
@@ -288,6 +310,20 @@ export const textTool: Tool = {
   down(p, doc) {
     if (useTextEdit.getState().at) return commitText(doc);
     useTextEdit.setState({ at: { x: Math.round(p.x), y: Math.round(p.y) }, value: '' });
+    const bm = bitmapFontId();
+    if (bm) void fontGlyphs(bm).then(() => requestRender());
+  },
+  overlay(ctx, v) {
+    // предпросмотр текста растровым шрифтом во время набора
+    const { at, value } = useTextEdit.getState();
+    const bm = bitmapFontId();
+    const f = bm ? useFonts.getState().fonts.find((x) => x.id === bm)?.font : null;
+    if (!at || !value || !f) return;
+    ctx.save();
+    ctx.translate(v.panX + at.x * v.zoom, v.panY + at.y * v.zoom);
+    ctx.scale(v.zoom, v.zoom);
+    drawBitmapText(ctx, f, value, 0, 0, bitmapOpts(f));
+    ctx.restore();
   },
   deactivate(doc) {
     if (doc && useTextEdit.getState().at) commitText(doc);

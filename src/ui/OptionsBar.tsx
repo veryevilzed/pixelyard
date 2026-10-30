@@ -8,6 +8,7 @@ import { cancelTransform, commitTransform, quadAngle, quadSize, resetTransform, 
 import { quadCenter } from '../core/warp';
 import { applyCrop, useCrop } from '../tools/crop';
 import { changed } from '../tools/base';
+import { useFonts } from '../core/fontLibrary';
 import { isAtlas, updateAtlas } from '../core/atlasDoc';
 import { atlasFormat, type AtlasSettings } from '../core/atlas';
 import { ALGORITHMS, HEURISTICS, SORTS } from '../core/pack';
@@ -93,6 +94,7 @@ export function OptionsBar() {
   const prefs = useApp((s) => s.prefs);
   const transform = useTransform();
   const crop = useCrop((s) => s.rect);
+  const bmFonts = useFonts((s) => s.fonts);
   useApp((s) => s.tick);
 
   if (transform.active) {
@@ -129,6 +131,7 @@ export function OptionsBar() {
 
   const label = TOOL_LABELS[tool];
   let body: React.ReactNode = null;
+  const bmActive = o.textFont.startsWith('bmfont:') && bmFonts.some((f) => `bmfont:${f.id}` === o.textFont);
 
   switch (tool) {
     case 'brush':
@@ -324,13 +327,29 @@ export function OptionsBar() {
       body = (
         <>
           <select value={o.textFont} onChange={(e) => setOpts({ textFont: e.target.value })}>
-            {FONTS.map((f) => (
-              <option key={f.id} value={f.id}>{f.label}</option>
-            ))}
+            <optgroup label="Системные">
+              {FONTS.map((f) => (
+                <option key={f.id} value={f.id}>{f.label}</option>
+              ))}
+            </optgroup>
+            {bmFonts.length > 0 && (
+              <optgroup label="Растровые (BMFont)">
+                {bmFonts.map((f) => (
+                  <option key={f.id} value={`bmfont:${f.id}`}>{f.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
+          {bmFonts.length === 0 && <button className="btn small" title="Создать растровый шрифт — он появится в этом списке" onClick={() => openDialog({ kind: 'bmfont' })}>+ BMFont</button>}
           <NumberField label="Кегль" value={o.textSize} min={4} max={1000} onChange={(v) => setOpts({ textSize: v })} suffix="px" />
-          <Check label={<b>Ж</b>} checked={o.textBold} onChange={(v) => setOpts({ textBold: v })} />
-          <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setOpts({ textItalic: v })} />
+          {bmActive ? (
+            <Check label="Перекрасить в основной цвет" checked={o.textBmTint} onChange={(v) => setOpts({ textBmTint: v })} title="Для одноцветных (например, белых) растровых шрифтов" />
+          ) : (
+            <>
+              <Check label={<b>Ж</b>} checked={o.textBold} onChange={(v) => setOpts({ textBold: v })} />
+              <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setOpts({ textItalic: v })} />
+            </>
+          )}
           <Check label="Сглаживание" checked={o.textAntialias} onChange={(v) => setOpts({ textAntialias: v })} />
           <span className="note">Клик — начать текст, ⌘Enter или клик снаружи — готово, Esc — отмена</span>
         </>

@@ -68,6 +68,8 @@ export interface ToolOptions {
   textBold: boolean;
   textItalic: boolean;
   textAntialias: boolean;
+  /** Растровый шрифт: перекрашивать глифы в основной цвет. */
+  textBmTint: boolean;
   moveAutoSelect: boolean;
   knifeDir: 'vertical' | 'horizontal';
   eyedropperMerged: boolean;
@@ -118,6 +120,7 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   textBold: false,
   textItalic: false,
   textAntialias: true,
+  textBmTint: false,
   moveAutoSelect: false,
   knifeDir: 'vertical',
   eyedropperMerged: true,
@@ -140,7 +143,7 @@ export type DialogState =
   | { kind: 'fill' }
   | { kind: 'curves' }
   | { kind: 'spritesheet'; source?: 'layers' | 'slices' | 'files'; ids?: string[] }
-  | { kind: 'bmfont' }
+  | { kind: 'bmfont'; fontId?: string }
   | { kind: 'new-guide' }
   | { kind: 'shortcuts' }
   | { kind: 'icon' }

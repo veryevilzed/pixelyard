@@ -8,8 +8,8 @@ import { clampNine } from '../core/nineslice';
 import type { Cuts, NineSlice } from '../core/types';
 import { usePatterns } from '../core/patterns';
 import { activeDoc, app, setPrefs, useApp, useCursor } from '../store';
-import { changed, getPickHook, onRenderRequest, snapPoint, type PointerInfo, type Tool } from '../tools/base';
-import { commitText, handTool, textFont, useTextEdit } from '../tools/fill';
+import { changed, getPickHook, onRenderRequest, requestRender, snapPoint, type PointerInfo, type Tool } from '../tools/base';
+import { bitmapFontId, commitText, handTool, textFont, useTextEdit } from '../tools/fill';
 import { effectiveTool } from '../tools';
 import { useTransform } from '../tools/transform';
 import { useCrop } from '../tools/crop';
@@ -475,11 +475,15 @@ function TextEditor() {
         left: v.panX + at.x * v.zoom,
         top: v.panY + at.y * v.zoom,
         font: textFont().replace(`${opts.textSize}px`, `${fontPx}px`),
-        color: `rgb(${fg[0]},${fg[1]},${fg[2]})`,
+        color: bitmapFontId() ? 'transparent' : `rgb(${fg[0]},${fg[1]},${fg[2]})`,
+        caretColor: `rgb(${fg[0]},${fg[1]},${fg[2]})`,
         width: longest * fontPx * 0.65 + 20,
         height: lines.length * fontPx * 1.25 + 4,
       }}
-      onChange={(e) => useTextEdit.setState({ value: e.target.value })}
+      onChange={(e) => {
+        useTextEdit.setState({ value: e.target.value });
+        requestRender();
+      }}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === 'Escape') useTextEdit.setState({ at: null, value: '' });

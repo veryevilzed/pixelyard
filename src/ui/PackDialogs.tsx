@@ -23,6 +23,7 @@ import type { Slice } from '../core/types';
 import { activeDoc, closeDialog, toast, type DialogState } from '../store';
 import { Check, ColorField, NumberField, Seg, TextInput } from './controls';
 import { Modal } from './Dialogs';
+import { saveFont, useFonts } from '../core/fontLibrary';
 
 // ---------- выбор формата и редактор своих шаблонов ----------
 
@@ -451,10 +452,14 @@ const FONT_FAMILIES = [
 
 type FontMode = string; // id формата, 'grid' или 'grid-json'
 
-export function BMFontDialog() {
-  const [s, setS] = useState<FontSettings>(() => ({ ...DEFAULT_FONT, ...JSON.parse(localStorage.getItem('pixelyard.bmfont') ?? '{}') }));
+export function BMFontDialog({ fontId }: { fontId?: string }) {
+  // правка шрифта из библиотеки — его настройки и имя; новый — последние использованные
+  const editing = fontId ? useFonts.getState().fonts.find((f) => f.id === fontId && f.settings) : undefined;
+  const [s, setS] = useState<FontSettings>(() => ({ ...DEFAULT_FONT, ...(editing?.settings ?? JSON.parse(localStorage.getItem('pixelyard.bmfont') ?? '{}')) }));
   const [charset, setCharset] = useState<string>(() => CHARSETS.find((c) => c.chars === s.chars)?.id ?? 'custom');
-  const [name, setName] = useState('font');
+  const [name, setName] = useState(editing?.name ?? 'font');
+  const [libId] = useState(() => editing?.id ?? uid('fn'));
+  const inLibrary = useFonts((st) => st.fonts.some((f) => f.id === libId));
   const [mode, setMode] = useState<FontMode>(() => localStorage.getItem('pixelyard.bmfont.mode') ?? 'fnt');
   const [columns, setColumns] = useState(16);
   // формат картинки шрифта запоминается вместе с настройками
@@ -600,12 +605,27 @@ export function BMFontDialog() {
 
   return (
     <Modal
-      title="Растровый шрифт (BMFont)"
+      title={editing ? `Растровый шрифт — ${editing.name}` : 'Растровый шрифт (BMFont)'}
       onClose={closeDialog}
       width={1180}
       footer={
         <>
-          <span className="left"><button className="btn" disabled={!layout?.canvas} onClick={openAsDoc}>Открыть атлас как документ</button></span>
+          <span className="left">
+            <button className="btn" disabled={!layout?.canvas} onClick={openAsDoc}>Открыть атлас как документ</button>
+            <button
+              className="btn"
+              disabled={!font}
+              title="Шрифт появится в инструменте «Текст» и в меню «Шрифт → Редактировать»"
+              onClick={() => {
+                if (!font) return;
+                saveFont({ id: libId, name, source: 'generated', settings: s, font });
+                localStorage.setItem('pixelyard.bmfont', JSON.stringify(s));
+                toast(inLibrary ? `Шрифт «${name}» обновлён` : `Шрифт «${name}» добавлен — выберите его в инструменте «Текст»`);
+              }}
+            >
+              {inLibrary ? 'Обновить в библиотеке' : 'В библиотеку шрифтов'}
+            </button>
+          </span>
           <button className="btn" onClick={closeDialog}>Закрыть</button>
           <button className="btn" disabled={!layout?.canvas} onClick={() => void save(true)}>В ZIP…</button>
           <button className="btn primary" disabled={!layout?.canvas} onClick={() => void save(false)}>Сохранить в папку…</button>

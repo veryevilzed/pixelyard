@@ -6,6 +6,7 @@ import { activeDoc, app, openDialog, setOpts, setPrefs, toast, useApp, type Tool
 import { changed } from './tools/base';
 import * as AT from './atlasActions';
 import { MODE_PANELS, resetDock, toggleTwoColumns, useDock } from './dock';
+import { removeFont, useFonts } from './core/fontLibrary';
 import { isAtlas, selectedSprites, updateAtlas } from './core/atlasDoc';
 import { detectAnimations } from './core/atlas';
 
@@ -80,7 +81,6 @@ export const MENUS: Menu[] = [
       { label: 'Экспорт слоёв по отдельности…', action: () => openDialog({ kind: 'export', source: 'layers' }), enabled: hasImg },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },
-      { label: 'Растровый шрифт (BMFont)…', shortcut: 'Alt+Mod+F', action: () => openDialog({ kind: 'bmfont' }) },
       { label: 'Иконка приложения (ICO, ICNS, favicon…)…', action: () => openDialog({ kind: 'icon' }), enabled: hasImg },
       { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasImg },
       'sep',
@@ -315,6 +315,37 @@ export const MENUS: Menu[] = [
       'sep',
       { label: 'Выгрузить атлас…', action: () => void AT.exportAtlasAction(), enabled: hasAtlas },
       { label: 'Сохранить проект (.pyard)', action: () => void A.saveDoc(false), enabled: hasAtlas },
+    ],
+  },
+  {
+    label: 'Шрифт',
+    items: [
+      { label: 'Новый растровый шрифт (BMFont)…', shortcut: 'Alt+Mod+F', action: () => openDialog({ kind: 'bmfont' }) },
+      {
+        label: 'Редактировать шрифт',
+        get submenu(): MenuEntry[] {
+          const list = useFonts.getState().fonts.filter((f) => f.source === 'generated');
+          return list.length ? list.map((f) => ({ label: f.name, action: () => openDialog({ kind: 'bmfont', fontId: f.id }) })) : [{ label: 'Нет созданных шрифтов', action: () => {}, enabled: () => false }];
+        },
+      },
+      { label: 'Открыть BMFont (.fnt)…', action: () => void A.importBitmapFont() },
+      'sep',
+      {
+        label: 'Писать шрифтом',
+        get submenu(): MenuEntry[] {
+          const list = useFonts.getState().fonts;
+          return list.length
+            ? list.map((f) => ({ label: f.name, action: () => (setOpts({ textFont: `bmfont:${f.id}` }), A.setTool('text')), checked: () => app().opts.textFont === `bmfont:${f.id}` }))
+            : [{ label: 'Библиотека пуста', action: () => {}, enabled: () => false }];
+        },
+      },
+      {
+        label: 'Удалить из библиотеки',
+        get submenu(): MenuEntry[] {
+          const list = useFonts.getState().fonts;
+          return list.length ? list.map((f) => ({ label: f.name, action: () => removeFont(f.id) })) : [{ label: 'Библиотека пуста', action: () => {}, enabled: () => false }];
+        },
+      },
     ],
   },
   {
