@@ -3,8 +3,9 @@ import { focusPaneAction } from '../actions';
 import { paneSizes, paneSize } from '../panes';
 import { ctx2d } from '../core/canvas';
 import type { Doc } from '../core/doc';
-import { clampView, compositeForView, fitView, renderView, RULER, toDoc, zoomAt } from '../core/render';
-import type { Cuts } from '../core/types';
+import { clampView, compositeForView, fitView, nineLines, renderView, RULER, toDoc, zoomAt } from '../core/render';
+import { clampNine } from '../core/nineslice';
+import type { Cuts, NineSlice } from '../core/types';
 import { usePatterns } from '../core/patterns';
 import { activeDoc, app, setPrefs, useApp, useCursor } from '../store';
 import { changed, getPickHook, onRenderRequest, snapPoint, type PointerInfo, type Tool } from '../tools/base';
@@ -123,6 +124,14 @@ export function Viewport({ paneId }: { paneId: string }) {
     /** Перетаскивание направляющей: новой (index = -1, из линейки) или существующей. */
     let guideDrag: { axis: 'x' | 'y'; index: number; orig: Cuts; value: number; inside: boolean; pointerId: number } | null = null;
 
+    // границы 9-slice двигаются мышью любым инструментом, кроме рисующих (с ними — через ⌘)
+    let nineDrag: { side: 'left' | 'right' | 'top' | 'bottom'; axis: 'x' | 'y'; orig: NineSlice; pointerId: number } | null = null;
+    const PAINT_TOOLS = ['brush', 'pencil', 'eraser', 'fill', 'gradient', 'shape', 'text', 'eyedropper', 'marquee-rect', 'marquee-ellipse', 'lasso', 'polygon-lasso', 'wand'];
+    const hitNine = (p: PointerInfo, doc: Doc, meta: boolean) => {
+      if (!doc.nine || (PAINT_TOOLS.includes(app().tool) && !meta)) return null;
+      const tol = 5 / doc.view.zoom;
+      return nineLines(doc).find((l) => Math.abs((l.axis === 'x' ? p.x : p.y) - l.value) <= tol) ?? null;
+    };
     const inRuler = (p: PointerInfo) => app().prefs.rulers && (p.sx < RULER || p.sy < RULER);
     const hitGuide = (p: PointerInfo, doc: Doc) => {
       const { prefs } = app();
@@ -183,6 +192,12 @@ export function Viewport({ paneId }: { paneId: string }) {
       if (!doc) return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       const p = info(e, doc);
+      const nh = e.button === 0 && !spaceDown && !inRuler(p) ? hitNine(p, doc, e.metaKey) : null;
+      if (nh && doc.nine) {
+        nineDrag = { side: nh.side, axis: nh.axis, orig: doc.nine, pointerId: e.pointerId };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       if (e.button === 0 && !spaceDown && !getPickHook()) {
         // направляющая: из линейки — новая; инструментом «Перемещение» или с ⌘ — существующая
         const hit = !inRuler(p) && (app().tool === 'move' || e.metaKey) ? hitGuide(p, doc) : null;
@@ -219,6 +234,21 @@ export function Viewport({ paneId }: { paneId: string }) {
     const onMove = (e: PointerEvent) => {
       const doc = paneDoc();
       if (!doc) return;
+      if (nineDrag && e.pointerId === nineDrag.pointerId) {
+        const p = info(e, doc);
+        const v = Math.round(nineDrag.axis === 'x' ? p.x : p.y);
+        const o = nineDrag.orig;
+        const next = { ...o };
+        if (nineDrag.side === 'left') next.left = v;
+        if (nineDrag.side === 'right') next.right = doc.width - v;
+        if (nineDrag.side === 'top') next.top = v;
+        if (nineDrag.side === 'bottom') next.bottom = doc.height - v;
+        doc.nine = clampNine(next, doc.width, doc.height);
+        canvas.style.cursor = nineDrag.axis === 'x' ? 'col-resize' : 'row-resize';
+        updateInfo(p, doc);
+        changed();
+        return;
+      }
       if (guideDrag && e.pointerId === guideDrag.pointerId) {
         const p = info(e, doc);
         guideDrag.value = guideValue(p, doc, guideDrag.axis);
@@ -248,6 +278,8 @@ export function Viewport({ paneId }: { paneId: string }) {
         updateCursor(p, doc);
         const g = app().tool === 'move' || e.metaKey ? hitGuide(p, doc) : null;
         if (g) canvas.style.cursor = g.axis === 'x' ? 'col-resize' : 'row-resize';
+        const nh = hitNine(p, doc, e.metaKey);
+        if (nh) canvas.style.cursor = nh.axis === 'x' ? 'col-resize' : 'row-resize';
         if (app().prefs.rulers) schedule();
       }
       updateInfo(lastInfo, doc);
@@ -255,6 +287,17 @@ export function Viewport({ paneId }: { paneId: string }) {
 
     const onUp = (e: PointerEvent) => {
       const doc = paneDoc();
+      if (nineDrag && e.pointerId === nineDrag.pointerId) {
+        const d = nineDrag;
+        nineDrag = null;
+        if (doc && doc.nine) {
+          const final = doc.nine;
+          doc.nine = d.orig;
+          if (JSON.stringify(final) !== JSON.stringify(d.orig)) doc.setNine(final, 'Граница 9-slice');
+          changed();
+        }
+        return;
+      }
       if (guideDrag && e.pointerId === guideDrag.pointerId) {
         const g = guideDrag;
         guideDrag = null;

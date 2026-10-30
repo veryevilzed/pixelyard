@@ -161,6 +161,8 @@ export async function editSpriteAction(doc: Doc, spriteId: string) {
     }
     d.path = null;
     d.name = sp.name;
+    // 9-slice спрайта правится в редакторе 9-slice вкладки
+    d.nine = sp.nine;
     d.link = { atlasDocId: doc.id, spriteId };
     addDoc(d);
   });
@@ -178,6 +180,11 @@ function flushLinked(d: Doc, withSource = false) {
   if (synced.get(d) !== d.rev) {
     synced.set(d, d.rev);
     replaceSpriteImage(atlas, link.spriteId, d.composite());
+    const sp = atlas.atlas.sprites.find((s) => s.id === link.spriteId);
+    if (sp && JSON.stringify(sp.nine) !== JSON.stringify(d.nine)) {
+      const nine = d.nine;
+      atlas.patchAtlasEverywhere((a) => ({ ...a, sprites: a.sprites.map((s) => (s.id === link.spriteId ? { ...s, nine } : s)) }));
+    }
     changed();
   }
   if (withSource) {

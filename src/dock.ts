@@ -6,10 +6,10 @@ import { create } from 'zustand';
  */
 
 export type DockMode = 'image' | 'atlas';
-export type PanelId = 'navigator' | 'color' | 'layers' | 'slices' | 'history' | 'atlas' | 'sprite' | 'anims' | 'atlasExport';
+export type PanelId = 'navigator' | 'color' | 'layers' | 'slices' | 'nine' | 'history' | 'atlas' | 'sprite' | 'anims' | 'atlasExport';
 
 export const MODE_PANELS: Record<DockMode, PanelId[]> = {
-  image: ['navigator', 'color', 'layers', 'slices', 'history'],
+  image: ['navigator', 'color', 'layers', 'slices', 'nine', 'history'],
   atlas: ['navigator', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'],
 };
 

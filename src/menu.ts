@@ -260,7 +260,20 @@ export const MENUS: Menu[] = [
       { label: 'Удалить все слайсы', action: A.clearSlices, enabled: hasSlices },
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Упаковать слайсы в спрайтшит…', action: () => openDialog({ kind: 'spritesheet', source: 'slices' }), enabled: hasSlices },
-      { label: 'Растровый шрифт (BMFont)…', action: () => openDialog({ kind: 'bmfont' }) },
+      'sep',
+      {
+        label: 'Редактор 9-slice',
+        action: () => {
+          const d = img();
+          if (d && !d.nine) {
+            const k = Math.max(1, Math.floor(Math.min(d.width, d.height) / 4));
+            d.setNine({ left: k, top: k, right: k, bottom: k }, 'Включить 9-slice');
+          }
+          useApp.setState((s) => ({ panels: { ...s.panels, nine: true } }));
+          changed();
+        },
+        enabled: hasImg,
+      },
     ],
   },
   {
@@ -362,8 +375,8 @@ export const MENUS: Menu[] = [
       { label: 'Панели в две колонки', action: () => toggleTwoColumns(dockMode()), checked: () => useDock.getState().layouts[dockMode()].cols.length > 1 },
       { label: 'Сбросить раскладку панелей', action: () => resetDock(dockMode()) },
       'sep',
-      ...(['navigator', 'color', 'layers', 'slices', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'] as const).map((k) => ({
-        label: { navigator: 'Навигатор', color: 'Цвет', layers: 'Слои', slices: 'Слайсы', atlas: 'Спрайты', sprite: 'Свойства спрайта', anims: 'Анимации', atlasExport: 'Выгрузка атласа', history: 'История' }[k],
+      ...(['navigator', 'color', 'layers', 'slices', 'nine', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'] as const).map((k) => ({
+        label: { navigator: 'Навигатор', color: 'Цвет', layers: 'Слои', slices: 'Слайсы', nine: '9-slice', atlas: 'Спрайты', sprite: 'Свойства спрайта', anims: 'Анимации', atlasExport: 'Выгрузка атласа', history: 'История' }[k],
         action: () => useApp.setState((s) => ({ panels: { ...s.panels, [k]: !s.panels[k] } })),
         checked: () => useApp.getState().panels[k],
         enabled: () => MODE_PANELS[dockMode()].includes(k),

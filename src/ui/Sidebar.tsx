@@ -10,6 +10,7 @@ import { Navigator } from './panels/Navigator';
 import { HistoryPanel } from './panels/HistoryPanel';
 import { LayersActions, LayersPanel } from './panels/LayersPanel';
 import { SlicesActions, SlicesPanel } from './panels/SlicesPanel';
+import { NinePanel } from './panels/NinePanel';
 
 interface PanelDef {
   title: string;
@@ -23,6 +24,7 @@ export const PANELS: Record<PanelId, PanelDef> = {
   color: { title: 'Цвет', body: () => <ColorPanel /> },
   layers: { title: 'Слои', body: () => <LayersPanel />, actions: () => <LayersActions />, grow: true },
   slices: { title: 'Слайсы', body: () => <SlicesPanel />, actions: () => <SlicesActions /> },
+  nine: { title: '9-slice', body: () => <NinePanel /> },
   history: { title: 'История', body: () => <HistoryPanel /> },
   atlas: { title: 'Спрайты', body: () => <AtlasPanel />, actions: () => <AtlasActions />, grow: true },
   sprite: { title: 'Свойства спрайта', body: () => <SpritePanel /> },

@@ -292,6 +292,7 @@ export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
 
   if (prefs.slices) drawSlices(ctx, doc, view, prefs.sliceLabels);
   drawCuts(ctx, doc, view, dr);
+  if (doc.nine) drawNineLines(ctx, doc, view);
 
   // выделение
   if (doc.selection && !r.hideSelection) {
@@ -425,4 +426,44 @@ export function resizeByHandle(r: Rect, handle: number, p: Point): Rect {
   if ([0, 1, 2].includes(handle)) y0 = p.y;
   if ([4, 5, 6].includes(handle)) y1 = p.y;
   return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+}
+
+/** Линии 9-slice документа: X — левая/правая граница, Y — верхняя/нижняя. */
+export function nineLines(doc: Doc): { side: 'left' | 'right' | 'top' | 'bottom'; axis: 'x' | 'y'; value: number }[] {
+  const n = doc.nine;
+  if (!n) return [];
+  return [
+    { side: 'left', axis: 'x', value: n.left },
+    { side: 'right', axis: 'x', value: doc.width - n.right },
+    { side: 'top', axis: 'y', value: n.top },
+    { side: 'bottom', axis: 'y', value: doc.height - n.bottom },
+  ];
+}
+
+function drawNineLines(ctx: CanvasRenderingContext2D, doc: Doc, view: ViewState) {
+  const r = rectToScreen(view, { x: 0, y: 0, w: doc.width, h: doc.height });
+  ctx.save();
+  // тянущиеся полосы чуть подсвечены
+  const n = doc.nine!;
+  const x0 = r.x + n.left * view.zoom, x1 = r.x + (doc.width - n.right) * view.zoom;
+  const y0 = r.y + n.top * view.zoom, y1 = r.y + (doc.height - n.bottom) * view.zoom;
+  ctx.fillStyle = 'rgba(0,220,160,0.07)';
+  ctx.fillRect(x0, r.y, Math.max(0, x1 - x0), r.h);
+  ctx.fillRect(r.x, y0, r.w, Math.max(0, y1 - y0));
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = 'rgba(0,230,170,0.95)';
+  ctx.beginPath();
+  for (const l of nineLines(doc)) {
+    const v = Math.round((l.axis === 'x' ? r.x : r.y) + l.value * view.zoom) + 0.5;
+    if (l.axis === 'x') {
+      ctx.moveTo(v, r.y - 8);
+      ctx.lineTo(v, r.y + r.h + 8);
+    } else {
+      ctx.moveTo(r.x - 8, v);
+      ctx.lineTo(r.x + r.w + 8, v);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
 }

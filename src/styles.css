@@ -1647,3 +1647,28 @@ code {
 .dock > .sidebar > .panel.grow {
   flex: 1 0 auto;
 }
+/* ---------- 9-slice ---------- */
+.nine-preview {
+  display: flex;
+  justify-content: center;
+}
+.nine-preview-box {
+  position: relative;
+  display: inline-block;
+  padding: 6px;
+  border-radius: 6px;
+  background-image: conic-gradient(#3a3a40 25%, #2e2e33 0 50%, #3a3a40 0 75%, #2e2e33 0);
+  background-size: 12px 12px;
+  line-height: 0;
+}
+.nine-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  cursor: nwse-resize;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}

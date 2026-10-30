@@ -2,7 +2,8 @@ import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid } from './canvas';
 import { blendToComposite, compositeLayers, grayToMaskData, maskToGray } from './composite';
 import type { AtlasState } from './atlas';
 import type { PackResult } from './pack';
-import { DEFAULT_EFFECTS, type Cuts, type LabelColor, type Layer, type LayerGroup, type Rect, type Selection, type Slice } from './types';
+import { clampNine } from './nineslice';
+import { DEFAULT_EFFECTS, type Cuts, type LabelColor, type Layer, type LayerGroup, type NineSlice, type Rect, type Selection, type Slice } from './types';
 
 /** Снимок «структуры» документа: ссылки на неизменяемые объекты. */
 interface Snapshot {
@@ -16,6 +17,7 @@ interface Snapshot {
   activeLayerId: string | null;
   atlas: AtlasState | null;
   groups: LayerGroup[];
+  nine: NineSlice | null;
 }
 
 interface PixelPatch {
@@ -71,6 +73,8 @@ export class Doc {
   layers: Layer[] = [];
   /** Папки слоёв (порядок не важен: место папки — место её слоёв). */
   groups: LayerGroup[] = [];
+  /** Границы 9-slice всей картинки (редактор 9-slice) или null. */
+  nine: NineSlice | null = null;
   slices: Slice[] = [];
   cuts: Cuts = { x: [], y: [] };
   guides: Cuts = { x: [], y: [] };
@@ -193,6 +197,7 @@ export class Doc {
       activeLayerId: this.activeLayerId,
       atlas: this.atlas,
       groups: this.groups,
+      nine: this.nine,
     };
   }
 
@@ -207,6 +212,7 @@ export class Doc {
     this.activeLayerId = s.activeLayerId;
     this.atlas = s.atlas;
     this.groups = s.groups;
+    this.nine = s.nine;
     if (this.activeSliceId && !this.slices.some((sl) => sl.id === this.activeSliceId)) this.activeSliceId = null;
   }
 
@@ -535,6 +541,7 @@ export class Doc {
       this.layers = this.layers.map((l) => ({ ...l, canvas: mapCanvas(l.canvas), mask: l.mask ? mapCanvas(l.mask) : null }));
       this.width = w;
       this.height = h;
+      if (this.nine) this.nine = clampNine(this.nine, w, h);
       this.selection = null;
       this.cuts = { x: [], y: [] };
       this.guides = { x: [], y: [] };
@@ -565,6 +572,12 @@ export class Doc {
     let n = this.slices.length + 1;
     while (this.slices.some((s) => s.name === `slice_${n}`)) n++;
     return `slice_${n}`;
+  }
+
+  setNine(nine: NineSlice | null, label = '9-slice') {
+    this.change(label, () => {
+      this.nine = nine;
+    });
   }
 
   setGuides(guides: Cuts, label: string) {
