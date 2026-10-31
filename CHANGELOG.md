@@ -3,7 +3,7 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
 Раздел текущей версии `npm run release` берёт в описание релиза на GitHub.
 
-## [0.2.0] — не выпущено
+## [0.2.0] — 2026-10-31
 
 ### Рабочее место
 - Боковые панели в несколько колонок: перетаскивание панели за заголовок между колонками, полоса «+» — новая колонка, ширина тянется; раскладка запоминается (отдельно для картинок и атласов)
@@ -66,5 +66,6 @@
 ### Сборка
 - Подписанные и нотаризованные сборки: `npm run release` (организации Apple, выпуск Developer ID)
 
+[0.2.0]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.2.0
 [0.1.2]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.1.2
 [0.1.1]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.1.1
