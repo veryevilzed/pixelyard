@@ -341,6 +341,30 @@ export function cut() {
   clearSelectionPixels('Вырезать');
 }
 
+/** Картинка в системном буфере обмена (скриншот, скопированное из браузера) или null. */
+async function systemClipboardImage(): Promise<HTMLCanvasElement | null> {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const type = it.types.find((t) => t.startsWith('image/'));
+      if (type) {
+        const blob = await it.getType(type);
+        return await decodeToCanvas({ name: 'clip.png', path: null, data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+    }
+  } catch {
+    // нет доступа к системному буферу
+  }
+  return null;
+}
+
+/** Что сейчас в буфере: системная картинка, если она новее внутренней копии, иначе внутренняя. */
+export async function clipboardImage(): Promise<HTMLCanvasElement | null> {
+  const sys = await systemClipboardImage();
+  const internalMatches = clipboard && sys && sys.width === clipboard.canvas.width && sys.height === clipboard.canvas.height;
+  return sys && !internalMatches ? sys : clipboard?.canvas ?? null;
+}
+
 export async function paste() {
   const doc = activeDoc();
   // системный буфер — если там картинка новее внутренней (например, скриншот)
@@ -372,10 +396,12 @@ export async function paste() {
   addImageAsLayer(doc, src.canvas, doc.nextLayerName('Вставка'), fits ? { x: src.x!, y: src.y! } : undefined);
 }
 
-export function pasteAsNewDoc() {
-  if (!clipboard) return toast('Буфер обмена пуст', 'error');
-  const d = new Doc('Без названия.psd', clipboard.canvas.width, clipboard.canvas.height);
-  const l = d.makeLayer('Слой 1', cloneCanvas(clipboard.canvas));
+/** Новый документ из буфера обмена: размер — по картинке, картинка — первым слоем. */
+export async function pasteAsNewDoc(name = 'Из буфера') {
+  const img = await clipboardImage();
+  if (!img) return toast('В буфере обмена нет картинки', 'error');
+  const d = new Doc(`${name}.psd`, img.width, img.height);
+  const l = d.makeLayer('Слой 1', cloneCanvas(img));
   d.layers = [l];
   d.activeLayerId = l.id;
   addDoc(d);

@@ -80,9 +80,33 @@ function NewDialog() {
   const [w, setW] = useState(512);
   const [h, setH] = useState(512);
   const [fill, setFill] = useState<'transparent' | 'white' | 'bg' | 'fg'>('transparent');
+  // размер картинки в буфере обмена — для кнопки «Из буфера обмена»
+  const [clip, setClip] = useState<{ w: number; h: number; url: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void A.clipboardImage().then((c) => {
+      if (!alive || !c) return;
+      // миниатюра: уменьшенная копия, чтобы не тащить огромный скриншот в data-URL
+      const k = Math.min(1, 320 / c.width, 200 / c.height);
+      const t = document.createElement('canvas');
+      t.width = Math.max(1, Math.round(c.width * k));
+      t.height = Math.max(1, Math.round(c.height * k));
+      const tc = t.getContext('2d')!;
+      tc.imageSmoothingQuality = 'high';
+      tc.drawImage(c, 0, 0, t.width, t.height);
+      setClip({ w: c.width, h: c.height, url: t.toDataURL() });
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const ok = () => {
     A.newDocument(`${name || 'Без названия'}.psd`, Math.round(w), Math.round(h), fill);
     closeDialog();
+  };
+  const fromClipboard = () => {
+    closeDialog();
+    void A.pasteAsNewDoc(name && name !== 'Без названия' ? name : 'Из буфера');
   };
   return (
     <Modal title="Новый документ" onClose={closeDialog} footer={<><button className="btn" onClick={closeDialog}>Отмена</button><button className="btn primary" onClick={ok}>Создать</button></>}>
@@ -94,6 +118,17 @@ function NewDialog() {
           <Seg value={fill} onChange={setFill} options={[{ id: 'transparent', label: 'Прозрачный' }, { id: 'white', label: 'Белый' }, { id: 'bg', label: 'Фоновый цвет' }, { id: 'fg', label: 'Основной цвет' }]} />
         </Row>
       </div>
+      {clip && (
+        <div className="clip-preview" onClick={fromClipboard} title="Создать документ из буфера обмена">
+          <img src={clip.url} alt="" />
+          <div>
+            <b>В буфере обмена</b>
+            <span>{clip.w} × {clip.h} px</span>
+            <button className="btn primary" onClick={(e) => (e.stopPropagation(), fromClipboard())}>Создать из буфера</button>
+            <button className="btn" onClick={(e) => (e.stopPropagation(), setW(clip.w), setH(clip.h))}>Только размер</button>
+          </div>
+        </div>
+      )}
       <div className="presets">
         {PRESETS.map((p) => (
           <button key={p.label} className="btn" onClick={() => { setW(p.w); setH(p.h); }}>{p.label}</button>

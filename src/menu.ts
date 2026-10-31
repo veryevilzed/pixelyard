@@ -70,6 +70,7 @@ export const MENUS: Menu[] = [
     label: 'Файл',
     items: [
       { label: 'Новый…', shortcut: 'Mod+N', action: () => openDialog({ kind: 'new' }) },
+      { label: 'Новый из буфера обмена', action: () => void A.pasteAsNewDoc() },
       { label: 'Открыть…', shortcut: 'Mod+O', action: () => void A.openDocuments() },
       { label: 'Поместить как слой…', shortcut: 'Shift+Mod+O', action: () => void A.placeFiles(), enabled: hasImg },
       'sep',
@@ -97,7 +98,7 @@ export const MENUS: Menu[] = [
       { label: 'Копировать', shortcut: 'Mod+C', action: () => A.copy(false), enabled: hasLayer },
       { label: 'Копировать сведённое', shortcut: 'Shift+Mod+C', action: () => A.copy(true), enabled: hasImg },
       { label: 'Вставить', shortcut: 'Mod+V', action: () => void A.paste() },
-      { label: 'Вставить как новый документ', shortcut: 'Alt+Mod+V', action: A.pasteAsNewDoc },
+      { label: 'Вставить как новый документ', shortcut: 'Alt+Mod+V', action: () => void A.pasteAsNewDoc() },
       { label: 'Очистить', shortcut: 'Backspace', action: () => A.clearSelectionPixels(), enabled: hasLayer },
       'sep',
       { label: 'Залить основным цветом', shortcut: 'Alt+Backspace', action: () => A.fillSelection('fg'), enabled: hasLayer },
