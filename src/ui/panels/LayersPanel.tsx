@@ -1,8 +1,11 @@
 import { ArrowDown, ArrowUp, ChevronRight, Copy, CornerLeftDown, Download, Eye, EyeOff, Folder, FolderOpen, FolderPlus, Lock, LockOpen, Merge, Plus, SquareDashed, Trash } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as A from '../../actions';
 import { ctx2d } from '../../core/canvas';
 import { selectionFromAlpha } from '../../core/selection';
+import { findItem } from '../CanvasMenu';
+import { formatShortcut } from '../../menu';
+import { runMenuItem } from '../../nativeMenu';
 import { BLEND_MODES, hasEffects, LABEL_COLORS, labelCss, type BlendMode, type LabelColor } from '../../core/types';
 import type { Doc } from '../../core/doc';
 import { activeDoc, openDialog, useApp } from '../../store';
@@ -390,7 +393,32 @@ export function LayersPanel() {
   );
 }
 
-/** Правый клик по слою или папке: цвет метки, папки. */
+/** Пункты главного меню (доступные сейчас) — действуют на активный слой; labels — свои подписи. */
+function MenuItems({ paths, labels = [], onClose }: { paths: string[]; labels?: string[]; onClose: () => void }) {
+  return (
+    <>
+      {paths.map((p, i) => {
+        const it = findItem(p.split(' › '));
+        if (!it || (it.enabled && !it.enabled())) return null;
+        return (
+          <button
+            key={p}
+            className="ctx-item"
+            onClick={() => {
+              onClose();
+              runMenuItem(it);
+            }}
+          >
+            <span>{labels[i] ?? it.label}</span>
+            {it.shortcut && <span className="ctx-key">{formatShortcut(it.shortcut)}</span>}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** Правый клик по слою или папке: свойства, стиль, объединение, маски, цвет метки, папки. */
 function LayerMenu({ doc, menu, onClose, onRenameGroup }: { doc: Doc; menu: { x: number; y: number; layerId?: string; groupId?: string }; onClose: () => void; onRenameGroup: (id: string) => void }) {
   useEffect(() => {
     const close = (e: PointerEvent) => !(e.target as HTMLElement).closest('.ctx-menu') && onClose();
@@ -402,6 +430,14 @@ function LayerMenu({ doc, menu, onClose, onRenameGroup }: { doc: Doc; menu: { x:
       window.removeEventListener('keydown', esc);
     };
   }, [onClose]);
+  // меню целиком в окне (оно длинное — по высоте подвигается вверх)
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: menu.x, top: menu.y });
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    setPos({ left: Math.max(4, Math.min(menu.x, window.innerWidth - r.width - 4)), top: Math.max(4, Math.min(menu.y, window.innerHeight - r.height - 4)) });
+  }, [menu.x, menu.y]);
   const layer = menu.layerId ? doc.getLayer(menu.layerId) : null;
   const group = doc.getGroup(menu.groupId);
   const cur = layer ? layer.color ?? null : group?.color ?? null;
@@ -417,17 +453,48 @@ function LayerMenu({ doc, menu, onClose, onRenameGroup }: { doc: Doc; menu: { x:
     onClose();
   };
   return (
-    <div className="ctx-menu" style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 260) }}>
+    <div ref={ref} className="ctx-menu" style={pos}>
       <div className="ctx-colors">
         <button className={`label-swatch none ${cur === null ? 'on' : ''}`} title="Без цвета" onClick={() => setColor(null)} />
         {LABEL_COLORS.map((c) => (
           <button key={c.id} className={`label-swatch ${cur === c.id ? 'on' : ''}`} style={{ background: c.css }} title={c.label} onClick={() => setColor(c.id)} />
         ))}
       </div>
+      {layer && (
+        <>
+          <button className="ctx-item" onClick={() => (openDialog({ kind: 'layer-props', layerId: layer.id }), onClose())}>Свойства слоя…</button>
+          <MenuItems paths={['Слои › Стиль слоя (тень, обводка, наложение)…']} labels={['Стиль слоя…']} onClose={onClose} />
+          <div className="ctx-sep" />
+        </>
+      )}
       {layer?.text && (
         <>
           <button className="ctx-item" onClick={() => (A.editTextAction(layer.id), onClose())}>Править текст</button>
           <button className="ctx-item" onClick={act(() => doc.rasterizeText(layer.id))}>Растрировать текст</button>
+          <div className="ctx-sep" />
+        </>
+      )}
+      {layer && (
+        <>
+          <MenuItems
+            paths={['Слои › Дублировать слой', 'Слои › Удалить слой']}
+            onClose={onClose}
+          />
+          <div className="ctx-sep" />
+          <MenuItems paths={['Слои › Объединить с нижним', 'Слои › Объединить видимые', 'Слои › Выполнить сведение']} onClose={onClose} />
+          <div className="ctx-sep" />
+          <MenuItems
+            paths={['Слои › Обтравочная маска', 'Слои › Маска слоя › Показать всё', 'Слои › Маска слоя › Из выделения', 'Слои › Маска слоя › Применить маску', 'Слои › Маска слоя › Удалить маску']}
+            labels={[layer.clip ? 'Отменить обтравочную маску' : 'Создать обтравочную маску', 'Добавить маску', 'Маска из выделения', 'Применить маску', 'Удалить маску']}
+            onClose={onClose}
+          />
+          <div className="ctx-sep" />
+          <MenuItems
+            paths={['Выделение › Непрозрачные пиксели слоя', 'Слои › Стиль слоя › Скопировать стиль', 'Слои › Стиль слоя › Вставить стиль', 'Слои › Стиль слоя › Очистить стиль', 'Слои › Стиль слоя › Растрировать стиль (запечь в пиксели)']}
+            labels={['Выделить пиксели слоя']}
+            onClose={onClose}
+          />
+          <div className="ctx-sep" />
         </>
       )}
       {layer && (

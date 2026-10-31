@@ -1,8 +1,8 @@
 import { Crosshair, Maximize2, Minimize2, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { centerView, fitMode, zoomBy, zoomTo } from '../../actions';
-import { ctx2d, scaleCanvas } from '../../core/canvas';
-import { compositeVersion, lastComposite, zoomAt } from '../../core/render';
+import { createCanvas, ctx2d } from '../../core/canvas';
+import { compositeVersion, displayLevel, lastComposite, zoomAt } from '../../core/render';
 import { sizeForDoc } from '../../panes';
 import { activeDoc, useApp } from '../../store';
 import { changed, onRenderRequest } from '../../tools/base';
@@ -58,10 +58,15 @@ export function Navigator() {
       if (comp) {
         const tw = Math.max(1, Math.round(L.w * dpr)), th = Math.max(1, Math.round(L.h * dpr));
         const version = compositeVersion(d);
-        // во время мазка (превью) миниатюра не пересчитывается — уменьшать весь документ каждый кадр дорого
-        const busy = !!d.preview && !!thumb && thumb.doc === d && thumb.w === tw && thumb.h === th;
-        if (!busy && (!thumb || thumb.doc !== d || thumb.version !== version || thumb.w !== tw || thumb.h !== th)) {
-          thumb = { doc: d, version, w: tw, h: th, canvas: scaleCanvas(comp, tw, th, true) };
+        if (!thumb || thumb.doc !== d || thumb.version !== version || thumb.w !== tw || thumb.h !== th) {
+          // из уменьшенного уровня экранной копии (видеопамять), а не из всего сведения — дёшево даже во время мазка
+          const src = displayLevel(d, comp, tw / comp.width);
+          const c = thumb?.canvas.width === tw && thumb.canvas.height === th ? thumb.canvas : createCanvas(tw, th);
+          const tc = c.getContext('2d')!;
+          tc.clearRect(0, 0, tw, th);
+          tc.imageSmoothingQuality = 'high';
+          tc.drawImage(src, 0, 0, tw, th);
+          thumb = { doc: d, version, w: tw, h: th, canvas: c };
         }
         ctx.imageSmoothingEnabled = true;
         if (thumb) ctx.drawImage(thumb.canvas, L.x, L.y, L.w, L.h);

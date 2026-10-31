@@ -1,4 +1,4 @@
-import { createCanvas, ctx2d, normRect } from '../core/canvas';
+import { createCanvas, ctx2d, intersectRect, normRect } from '../core/canvas';
 import type { Doc } from '../core/doc';
 import { floodMaskData } from '../core/flood';
 import { compositeForView, toScreen } from '../core/render';
@@ -26,9 +26,15 @@ const MODE_LABEL: Record<SelectMode, string> = {
 function applyShape(doc: Doc, spec: ShapeSpec, mode: SelectMode) {
   const o = app().opts;
   const mask = shapeMask(doc.width, doc.height, spec, o.selectAntialias);
-  let shape = selectionFromMask(mask);
-  if (shape && o.feather > 0) shape = featherSelection(shape, o.feather);
-  const next = combineSelection(mode === 'replace' ? null : doc.selection, shape ? shape.mask : createCanvas(doc.width, doc.height), mode);
+  // маска читается один раз — при сложении с текущим выделением; растушёвке нужен её контур заранее
+  let shapeMaskFinal = mask;
+  if (o.feather > 0) {
+    const shape = selectionFromMask(mask);
+    shapeMaskFinal = shape ? featherSelection(shape, o.feather)?.mask ?? createCanvas(doc.width, doc.height) : createCanvas(doc.width, doc.height);
+  }
+  // прямоугольная рамка без растушёвки: границы и контур известны, маску можно не читать
+  const r = spec.kind === 'rect' && o.feather <= 0 ? intersectRect({ x: Math.round(spec.rect.x), y: Math.round(spec.rect.y), w: Math.round(spec.rect.w), h: Math.round(spec.rect.h) }, { x: 0, y: 0, w: doc.width, h: doc.height }) : null;
+  const next = combineSelection(mode === 'replace' ? null : doc.selection, shapeMaskFinal, mode, r ?? undefined);
   doc.setSelection(next, next ? MODE_LABEL[mode] : 'Снять выделение');
   changed();
 }

@@ -2198,3 +2198,224 @@ code {
   margin: 3px 4px;
   background: var(--line-soft);
 }
+/* контекстные меню: подписи слева, сочетания справа; длинное меню прокручивается */
+.ctx-menu {
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+}
+.ctx-menu .ctx-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 4px 8px;
+}
+.ctx-menu {
+  min-width: 250px;
+}
+.ctx-menu .ctx-item > span:first-child {
+  white-space: nowrap;
+}
+/* свойства слоя */
+.layer-props {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.layer-props .row-fields > .label.static:first-child,
+.layer-props .field > .label.static:first-child {
+  width: 110px;
+  flex-shrink: 0;
+}
+.layer-props .field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.layer-props .field input[type='range'] {
+  flex: 1;
+  width: auto !important;
+}
+.layer-props {
+  align-items: stretch;
+  text-align: left;
+}
+.layer-props > * {
+  width: 100%;
+  justify-content: flex-start;
+}
+.layer-props .label.static {
+  text-align: left;
+  color: var(--text-dim);
+}
+.layer-props .checks {
+  padding-left: 116px;
+  gap: 14px;
+}
+.layer-props .note {
+  padding-left: 116px;
+}
+/* строки диалогов не вылезают вбок: колонки сжимаются, длинные подписи переносятся */
+.range-row {
+  grid-template-columns: minmax(90px, 170px) minmax(0, 1fr) auto;
+}
+.range-row > * {
+  min-width: 0;
+}
+/* панель параметров на узком окне: подсказки сокращаются многоточием (полностью — во всплывающей
+   подсказке), кнопки, если не влезают, переносятся на вторую строку — ничего не уходит за край */
+.optionsbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 36px;
+  row-gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  overflow-x: hidden;
+}
+.optionsbar > .note {
+  flex: 1 1 140px;
+  min-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.optionsbar > .note {
+  flex: 1 1 0;
+  min-width: 60px;
+}
+/* ---------- градиент ---------- */
+.grad-button {
+  width: 140px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg3);
+  cursor: pointer;
+  display: inline-flex;
+}
+.grad-strip {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+}
+.grad-kind {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  vertical-align: -2px;
+}
+.grad-pop {
+  position: fixed;
+  z-index: 2000;
+  width: 380px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.grad-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.grad-preset {
+  display: block;
+  padding: 2px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.grad-preset:hover {
+  border-color: var(--accent);
+}
+.grad-editor {
+  position: relative;
+  padding: 0 7px 18px;
+}
+.grad-bar {
+  cursor: copy;
+}
+.grad-stops {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 0;
+  height: 16px;
+}
+.grad-stop {
+  position: absolute;
+  top: 2px;
+  width: 12px;
+  height: 14px;
+  margin-left: -6px;
+  background: var(--bg4);
+  border: 1px solid #aaa;
+  border-radius: 2px 2px 3px 3px;
+  cursor: ew-resize;
+  padding: 2px;
+}
+.grad-stop > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 1px;
+}
+.grad-stop.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* группы инструментов: треугольник в углу, список вариантов по удержанию */
+.tool-btn.has-group {
+  position: relative;
+}
+.tool-btn.has-group::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border-left: 4px solid transparent;
+  border-bottom: 4px solid currentColor;
+  opacity: 0.6;
+}
+.tool-fly {
+  position: fixed;
+  z-index: 2000;
+  padding: 4px;
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.tool-fly-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.tool-fly-item span:nth-child(2) {
+  flex: 1;
+}
+.tool-fly-item:hover,
+.tool-fly-item.on {
+  background: var(--accent);
+  color: #fff;
+}
+.tool-fly-item:hover .ctx-key,
+.tool-fly-item.on .ctx-key {
+  color: rgba(255, 255, 255, 0.8);
+}

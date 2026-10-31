@@ -1,5 +1,6 @@
 import { alphaBounds, canvasToBlob, cloneCanvas, createCanvas, cropCanvas, ctx2d, intersectRect, rgbaToCss, scaleCanvas, uid } from './core/canvas';
 import { Doc } from './core/doc';
+import { applyFilterAsync } from './core/filterPool';
 import { FILTERS, type Params } from './core/filters';
 import { decodeFile, decodeToCanvas, encodeCanvas, encodePsd, fileStem, OPEN_FILTERS } from './core/io';
 import { baseName, confirmDialog, isTauri, openFiles, readPath, saveFileAs, writePath, type LoadedFile } from './core/platform';
@@ -702,25 +703,54 @@ export function trimTransparent() {
 
 // ---------- фильтры ----------
 
-/** Результат фильтра для слоя с учётом выделения (для превью и применения). */
-export function filterResult(d: Doc, layerCanvas: HTMLCanvasElement, filterId: string, params: Params): HTMLCanvasElement {
-  const f = FILTERS.find((x) => x.id === filterId)!;
-  const ctx = ctx2d(layerCanvas);
-  // обрабатываем только область выделения (+ запас для размытий), остальное копируем как есть
+/** Область, которую обрабатывает фильтр: выделение (+ запас для размытий) или весь документ. */
+function filterArea(d: Doc, params: Params) {
   const pad = typeof params.radius === 'number' ? (params.radius as number) * 3 : typeof params.size === 'number' ? (params.size as number) + 2 : 64;
-  const area = d.selection
+  return d.selection
     ? intersectRect({ x: d.selection.bounds.x - pad, y: d.selection.bounds.y - pad, w: d.selection.bounds.w + pad * 2, h: d.selection.bounds.h + pad * 2 }, { x: 0, y: 0, w: d.width, h: d.height })
     : { x: 0, y: 0, w: d.width, h: d.height };
-  const out = cloneCanvas(layerCanvas);
-  if (!area) return out;
-  const img = ctx.getImageData(area.x, area.y, area.w, area.h);
-  const res = f.apply(img, params) ?? img;
+}
+
+/** Пиксели после фильтра (res — для области area) → слой целиком, с учётом выделения. */
+function filterOutput(d: Doc, layerCanvas: HTMLCanvasElement, area: Rect, res: ImageData) {
   const processed = createCanvas(d.width, d.height);
   ctx2d(processed).putImageData(res, area.x, area.y);
   if (!d.selection) return processed;
-  const octx = ctx2d(out);
-  blendThroughSelection(octx, processed, d.selection);
+  const out = cloneCanvas(layerCanvas);
+  blendThroughSelection(ctx2d(out), processed, d.selection);
   return out;
+}
+
+/** Результат фильтра для слоя с учётом выделения (для превью и применения). */
+export function filterResult(d: Doc, layerCanvas: HTMLCanvasElement, filterId: string, params: Params): HTMLCanvasElement {
+  const f = FILTERS.find((x) => x.id === filterId)!;
+  // обрабатываем только область выделения (+ запас для размытий), остальное копируем как есть
+  const area = filterArea(d, params);
+  if (!area) return cloneCanvas(layerCanvas);
+  const img = ctx2d(layerCanvas).getImageData(area.x, area.y, area.w, area.h);
+  return filterOutput(d, layerCanvas, area, f.apply(img, params) ?? img);
+}
+
+/** То же в фоновых потоках (попиксельные коррекции — по всем ядрам), интерфейс не замирает. */
+export async function filterResultAsync(d: Doc, layerCanvas: HTMLCanvasElement, filterId: string, params: Params): Promise<{ canvas: HTMLCanvasElement; area: Rect | null }> {
+  const area = filterArea(d, params);
+  if (!area) return { canvas: cloneCanvas(layerCanvas), area: null };
+  const img = ctx2d(layerCanvas).getImageData(area.x, area.y, area.w, area.h);
+  const res = await applyFilterAsync(img, filterId, params);
+  return { canvas: filterOutput(d, layerCanvas, area, res), area };
+}
+
+/** Записать готовый результат фильтра в слой (одна запись истории; с выделением — только его область). */
+export function commitFilterResult(d: Doc, layerId: string, filterId: string, r: { canvas: HTMLCanvasElement; area: Rect | null }) {
+  const f = FILTERS.find((x) => x.id === filterId)!;
+  if (!d.getLayer(layerId)) return;
+  const rect = d.selection && r.area ? r.area : null;
+  d.pixelEdit(layerId, rect, f.label.replace('…', ''), (ctx) => {
+    const b = rect ?? { x: 0, y: 0, w: d.width, h: d.height };
+    ctx.clearRect(b.x, b.y, b.w, b.h);
+    ctx.drawImage(r.canvas, b.x, b.y, b.w, b.h, b.x, b.y, b.w, b.h);
+  });
+  changed();
 }
 
 export function applyFilter(filterId: string, params: Params) {
@@ -728,13 +758,16 @@ export function applyFilter(filterId: string, params: Params) {
   const l = d?.activeLayer;
   if (!d || !l) return;
   if (l.locked) return toast(`Слой «${l.name}» заблокирован`, 'error');
-  const result = filterResult(d, d.editSource(l), filterId, params);
-  const f = FILTERS.find((x) => x.id === filterId)!;
-  d.pixelEdit(l.id, null, f.label.replace('…', ''), (ctx) => {
-    ctx.clearRect(0, 0, d.width, d.height);
-    ctx.drawImage(result, 0, 0);
-  });
-  changed();
+  const source = d.editSource(l);
+  const rev = d.rev;
+  void filterResultAsync(d, source, filterId, params).then(
+    (r) => {
+      // пока считалось, документ поменяли — не затираем чужую правку
+      if (d.rev !== rev) return toast('Фильтр не применён: документ изменился, пока он считался', 'error');
+      commitFilterResult(d, l.id, filterId, r);
+    },
+    (e) => toast(e instanceof Error ? e.message : String(e), 'error'),
+  );
 }
 
 export function runFilter(filterId: string) {

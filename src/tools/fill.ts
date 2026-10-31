@@ -5,8 +5,9 @@ import { floodMask } from '../core/flood';
 import { tiled } from '../core/patterns';
 import { compositeForView, nextZoom, toScreen, zoomAt } from '../core/render';
 import { hardenMask, maskedCopy } from '../core/selection';
-import type { Point, RGBA, TextData } from '../core/types';
+import type { Point, TextData } from '../core/types';
 import { app, setBg, setFg, setOpts, toast } from '../store';
+import { drawGradient, resolveStops } from '../core/gradient';
 import { addTextLayer, drawTextLayout, layoutBitmap, layoutVector, textLayerAt, updateTextLayer, type TextLayout } from '../core/textLayer';
 import { fontGlyphs, useFonts } from '../core/fontLibrary';
 import type { RenderedFont } from '../core/bmfont';
@@ -64,17 +65,9 @@ let grad: { a: Point; b: Point; doc: Doc; layerId: string } | null = null;
 
 function gradientCanvas(doc: Doc, a: Point, b: Point): HTMLCanvasElement {
   const o = app().opts;
-  let c0: RGBA = app().fg, c1: RGBA = o.gradientToTransparent ? [c0[0], c0[1], c0[2], 0] : app().bg;
-  if (o.gradientReverse) [c0, c1] = [c1, c0];
+  const st = resolveStops(o.gradientStops, app().fg, app().bg, o.gradientReverse);
   const c = createCanvas(doc.width, doc.height);
-  const ctx = ctx2d(c);
-  const g = o.gradientKind === 'linear'
-    ? ctx.createLinearGradient(a.x, a.y, b.x, b.y)
-    : ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)));
-  g.addColorStop(0, rgbaToCss(c0));
-  g.addColorStop(1, rgbaToCss(c1));
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, doc.width, doc.height);
+  drawGradient(ctx2d(c), doc.width, doc.height, a, b, o.gradientKind, st);
   return doc.selection ? maskedCopy(c, doc.selection) : c;
 }
 

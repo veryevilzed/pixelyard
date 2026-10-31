@@ -16,7 +16,7 @@ export const openCanvasMenu = (x: number, y: number) => useCanvasMenu.setState({
 const close = () => useCanvasMenu.setState(null, true);
 
 /** Пункт главного меню по пути «Меню › [подменю ›] пункт». */
-function findItem(path: string[]): MenuItem | null {
+export function findItem(path: string[]): MenuItem | null {
   let list: MenuEntry[] = MENUS.find((m) => m.label === path[0])?.items ?? [];
   for (const [i, name] of path.slice(1).entries()) {
     const e = list.find((x) => x !== 'sep' && x.label === name);

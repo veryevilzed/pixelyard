@@ -44,12 +44,19 @@ export function CurvesDialog() {
       requestRender();
       return;
     }
+    // в фоновых потоках; устаревший результат отбрасывается
+    let alive = true;
     const t = setTimeout(() => {
-      const res = A.filterResult(doc, source, 'curves', { curves });
-      doc.preview = { layerId: layer.id, draw: (ctx) => ctx.drawImage(res, 0, 0) };
-      requestRender();
+      void A.filterResultAsync(doc, source, 'curves', { curves }).then(({ canvas }) => {
+        if (!alive) return;
+        doc.preview = { layerId: layer.id, draw: (ctx) => ctx.drawImage(canvas, 0, 0) };
+        requestRender();
+      });
     }, 30);
-    return () => clearTimeout(t);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
   }, [curves, preview, doc, layer, source]);
   useEffect(() => () => {
     doc.preview = null;

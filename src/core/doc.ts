@@ -1,4 +1,4 @@
-import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid } from './canvas';
+import { cloneCanvas, createCanvas, ctx2d, intersectRect, uid, unionRect } from './canvas';
 import { blendToComposite, compositeLayers, grayToMaskData, maskToGray, touchCanvas } from './composite';
 import type { AtlasState } from './atlas';
 import type { PackResult } from './pack';
@@ -116,6 +116,11 @@ export class Doc {
   /** true, пока вид ещё не подогнан под размер окна. */
   needsFit = true;
   preview: LayerPreview | null = null;
+  /**
+   * Область пикселей, изменённая правками и отменой/повтором с прошлого сведения: сведение
+   * пересчитывается только в ней (render.ts сбрасывает её после сведения).
+   */
+  pixelDirty: Rect | null = null;
 
   private grayCache: { mask: HTMLCanvasElement; rev: number; gray: HTMLCanvasElement } | null = null;
 
@@ -263,6 +268,7 @@ export class Doc {
       ctx.restore();
     }
     touchCanvas(canvas);
+    this.pixelDirty = this.pixelDirty ? unionRect(this.pixelDirty, r) : r;
     return { layerId: layer.id, target, rect: r, before, after: ctx.getImageData(r.x, r.y, r.w, r.h) };
   }
 
@@ -326,6 +332,7 @@ export class Doc {
       if (canvas) {
         ctx2d(canvas).putImageData(p[which], p.rect.x, p.rect.y);
         touchCanvas(canvas);
+        this.pixelDirty = this.pixelDirty ? unionRect(this.pixelDirty, p.rect) : p.rect;
       }
     }
   }

@@ -271,6 +271,9 @@ export function touchCanvas(c: HTMLCanvasElement | null | undefined) {
 }
 const ver = (c: HTMLCanvasElement | null) => (c ? canvasVersions.get(c) ?? 0 : -1);
 
+/** Отпечаток версий пикселей всех слоёв и масок: не изменился — пиксели слоёв те же. */
+export const pixelStamp = (layers: Layer[]) => layers.map((l) => `${ver(l.canvas)}.${ver(l.mask ?? null)}`).join(',');
+
 /**
  * Кэш отрендеренных слоёв (эффекты, маска): ключ — объект слоя (свойства неизменяемы)
  * + версии пикселей слоя и маски. Правка одного слоя не пересчитывает эффекты остальных.

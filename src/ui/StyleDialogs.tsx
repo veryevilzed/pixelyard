@@ -39,7 +39,7 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="range-row">
       <span className="lbl">{label}</span>
-      <span style={{ display: 'flex', gap: 8, alignItems: 'center', gridColumn: '2 / 4' }}>{children}</span>
+      <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', gridColumn: '2 / 4', minWidth: 0 }}>{children}</span>
     </div>
   );
 }

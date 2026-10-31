@@ -1,4 +1,4 @@
-import { createCanvas, ctx2d, rgbaToCss, unionRect } from '../core/canvas';
+import { createCanvas, ctx2d, intersectRect, rgbaToCss, unionRect } from '../core/canvas';
 import type { Doc } from '../core/doc';
 import { maskedCopy } from '../core/selection';
 import type { Point, Rect, RGBA } from '../core/types';
@@ -293,10 +293,13 @@ function commit() {
   if (!s.bbox) return changed();
   const buf = strokeLayer(s);
   const labels: Record<string, string> = { brush: 'Кисть', pencil: 'Карандаш', eraser: 'Ластик', stamp: 'Штамп' };
-  s.doc.pixelEdit(s.layerId, s.bbox, labels[currentKind], (ctx) => {
+  // переносится только прямоугольник мазка, а не холст размером с документ
+  const b = intersectRect(s.bbox, { x: 0, y: 0, w: buf.width, h: buf.height });
+  if (!b) return changed();
+  s.doc.pixelEdit(s.layerId, b, labels[currentKind], (ctx) => {
     ctx.globalAlpha = s.opacity;
     ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
-    ctx.drawImage(buf, 0, 0);
+    ctx.drawImage(buf, b.x, b.y, b.w, b.h, b.x, b.y, b.w, b.h);
   });
   changed();
 }

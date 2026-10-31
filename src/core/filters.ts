@@ -82,9 +82,70 @@ export function hslToRgb(h: number, s: number, l: number): [number, number, numb
 }
 
 /** Трёхпроходное box-размытие ≈ гауссово; работает с премультиплицированной альфой. */
+// ---------- размытие на видеокарте (фильтр холста) ----------
+
+let nativeBlurOk: boolean | null = null;
+const gpuCanvas2d = (w: number, h: number) => {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c.getContext('2d')!;
+};
+
+/** Есть ли у холста рабочий filter: blur() (проверяется по пикселям — свойство может быть, а эффекта нет). */
+function nativeBlurSupported() {
+  if (nativeBlurOk !== null) return nativeBlurOk;
+  nativeBlurOk = false;
+  try {
+    if (typeof document === 'undefined') return false;
+    const src = gpuCanvas2d(9, 1);
+    src.fillRect(4, 0, 1, 1);
+    const dst = gpuCanvas2d(9, 1);
+    dst.filter = 'blur(2px)';
+    if (dst.filter !== 'blur(2px)') return false;
+    dst.drawImage(src.canvas, 0, 0);
+    nativeBlurOk = dst.getImageData(1, 0, 1, 1).data[3] > 0;
+  } catch {
+    nativeBlurOk = false;
+  }
+  return nativeBlurOk;
+}
+
+/**
+ * Гауссово размытие фильтром холста (на видеокарте, в разы быстрее циклов). Края продолжаются
+ * крайними пикселями — как у программного размытия. Результат пишется в img. false — не поддерживается.
+ */
+function nativeBlur(img: ImageData, sigma: number): boolean {
+  if (!nativeBlurSupported()) return false;
+  const { width: w, height: h } = img;
+  const pad = Math.ceil(sigma * 3) + 1;
+  // больше предельного размера текстуры — программно
+  if (Math.max(w, h) + pad * 2 > 16384) return false;
+  const src = gpuCanvas2d(w, h);
+  src.putImageData(img, 0, 0);
+  const S = src.canvas;
+  const padded = gpuCanvas2d(w + pad * 2, h + pad * 2);
+  padded.drawImage(S, pad, pad);
+  // поля — растянутые крайние строки/столбцы и угловые пиксели
+  padded.drawImage(S, 0, 0, w, 1, pad, 0, w, pad);
+  padded.drawImage(S, 0, h - 1, w, 1, pad, pad + h, w, pad);
+  padded.drawImage(S, 0, 0, 1, h, 0, pad, pad, h);
+  padded.drawImage(S, w - 1, 0, 1, h, pad + w, pad, pad, h);
+  padded.drawImage(S, 0, 0, 1, 1, 0, 0, pad, pad);
+  padded.drawImage(S, w - 1, 0, 1, 1, pad + w, 0, pad, pad);
+  padded.drawImage(S, 0, h - 1, 1, 1, 0, pad + h, pad, pad);
+  padded.drawImage(S, w - 1, h - 1, 1, 1, pad + w, pad + h, pad, pad);
+  const out = gpuCanvas2d(w + pad * 2, h + pad * 2);
+  out.filter = `blur(${sigma}px)`;
+  out.drawImage(padded.canvas, 0, 0);
+  img.data.set(out.getImageData(pad, pad, w, h).data);
+  return true;
+}
+
 export function blurImageData(img: ImageData, radius: number): ImageData {
   const r = Math.max(0, Math.round(radius));
   if (!r) return img;
+  if (nativeBlur(img, r / 2 + 0.5)) return img;
   const { width: w, height: h, data } = img;
   const n = w * h;
   const ch = [new Float32Array(n), new Float32Array(n), new Float32Array(n), new Float32Array(n)];

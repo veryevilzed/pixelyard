@@ -4,6 +4,7 @@ import * as A from '../../actions';
 import { createCanvas, ctx2d } from '../../core/canvas';
 import { EFFECT_CATEGORIES, EFFECT_PRESETS, presetParams, thumbParams, type EffectCategory, type EffectPreset } from '../../core/effectPresets';
 import { FILTERS } from '../../core/filters';
+import { pixelStamp } from '../../core/composite';
 import { activeDoc, useApp } from '../../store';
 import { changed, requestRender } from '../../tools/base';
 
@@ -48,11 +49,15 @@ export function EffectsPanel() {
   useEffect(() => localStorage.setItem(CAT_KEY, cat), [cat]);
 
   // миниатюры пересчитываются при смене слоя/пикселей (с задержкой, чтобы не мешать рисованию)
-  const key = doc && layer ? `${doc.id}:${layer.id}:${doc.rev}:${cat}:${doc.editingMask}` : '';
+  // пересчёт — только при смене пикселей слоя, выделения или раздела (не при любой правке документа)
+  const sel = doc?.selection?.bounds;
+  const key = doc && layer ? `${doc.id}:${layer.id}:${pixelStamp([layer])}:${sel ? `${sel.x},${sel.y},${sel.w},${sel.h}` : ''}:${cat}:${doc.editingMask}` : '';
   useEffect(() => {
     if (!doc || !layer) return setThumbs(new Map());
     let alive = true;
     const t = setTimeout(() => {
+      // во время мазка или предпросмотра — позже (ключ сменится после него)
+      if (doc.preview && !previewOwned) return;
       const src = doc.editSource(layer);
       const b = doc.selection?.bounds ?? { x: 0, y: 0, w: doc.width, h: doc.height };
       const base = sourceThumb(src, b);
@@ -100,10 +105,13 @@ export function EffectsPanel() {
     if (d.preview && !previewOwned) return;
     setTimeout(() => {
       if (hovering.current !== p.id) return;
-      const result = A.filterResult(d, d.editSource(l), p.filterId, presetParams(p));
-      d.preview = { layerId: l.id, draw: (ctx) => ctx.drawImage(result, 0, 0) };
-      previewOwned = true;
-      requestRender();
+      void A.filterResultAsync(d, d.editSource(l), p.filterId, presetParams(p)).then(({ canvas }) => {
+        // курсор уже ушёл на другой эффект или с панели
+        if (hovering.current !== p.id || (d.preview && !previewOwned)) return;
+        d.preview = { layerId: l.id, draw: (ctx) => ctx.drawImage(canvas, 0, 0) };
+        previewOwned = true;
+        requestRender();
+      });
     }, 120);
   };
 

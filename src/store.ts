@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Doc } from './core/doc';
 import type { RGBA, TextAlign, TextVAlign } from './core/types';
+import { GRADIENT_PRESETS, type GradientKind, type GradStop } from './core/gradient';
 import type { LoadedFile } from './core/platform';
 
 export type ToolId =
@@ -70,7 +71,9 @@ export interface ToolOptions {
   shapeRadius: number;
   shapeNewLayer: boolean;
   shapeAntialias: boolean;
-  gradientKind: 'linear' | 'radial';
+  gradientKind: GradientKind;
+  /** Точки текущего градиента (редактор в панели параметров). */
+  gradientStops: GradStop[];
   gradientToTransparent: boolean;
   gradientReverse: boolean;
   textFont: string;
@@ -132,6 +135,7 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   shapeNewLayer: true,
   shapeAntialias: true,
   gradientKind: 'linear',
+  gradientStops: GRADIENT_PRESETS[0].stops,
   gradientToTransparent: false,
   gradientReverse: false,
   textFont: '-apple-system, Helvetica, Arial, sans-serif',
@@ -159,6 +163,7 @@ export type DialogState =
   | { kind: 'select-modify'; op: 'grow' | 'shrink' | 'feather' | 'border' }
   | { kind: 'grid-settings' }
   | { kind: 'layer-style' }
+  | { kind: 'layer-props'; layerId: string }
   | { kind: 'color-range' }
   | { kind: 'cut-step' }
   | { kind: 'fill' }
@@ -232,6 +237,8 @@ const savedOpts = (() => {
       delete o.wandSampleMerged;
       localStorage.setItem('pixelyard.optsVersion', '2');
     }
+    // прежняя галочка «основной → прозрачный» — теперь это набор градиента
+    if (!o.gradientStops && o.gradientToTransparent) o.gradientStops = GRADIENT_PRESETS[1].stops;
     return o;
   } catch {
     return {};

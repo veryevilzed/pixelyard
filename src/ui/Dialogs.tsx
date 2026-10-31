@@ -3,7 +3,7 @@ import * as A from '../actions';
 import { DEFAULT_EXPORT, runExport, type ExportOptions } from '../core/export';
 import { defaultParams, FILTERS, histogram, type Params } from '../core/filters';
 import { autoSlices, gridSlices, type AutoOptions, type GridOptions } from '../core/slicing';
-import type { RGBA, Slice } from '../core/types';
+import type { Rect, RGBA, Slice } from '../core/types';
 import { formatShortcut, MENUS, type MenuEntry } from '../menu';
 import { isTauri } from '../core/platform';
 import { APP_NAME, APP_VERSION, BUILD_COMMIT, BUILD_DATE } from '../version';
@@ -13,6 +13,7 @@ import { Check, ColorField, NumberField, Seg, TextInput } from './controls';
 import { ColorRangeDialog, CutStepDialog, FillDialog, LayerStyleDialog, NewGuideDialog } from './StyleDialogs';
 import { CurvesDialog } from './CurvesDialog';
 import { BMFontDialog, SpriteSheetDialog } from './PackDialogs';
+import { LayerPropsDialog } from './LayerPropsDialog';
 import { IconDialog } from './IconDialog';
 import { PdfExportDialog, PdfImportDialog } from './PdfDialogs';
 import { PrintDialog } from './PrintDialog';
@@ -224,7 +225,8 @@ function FilterDialog({ filterId }: { filterId: string }) {
   const doc = activeDoc()!;
   const [params, setParams] = useState<Params>(() => defaultParams(f));
   const [preview, setPreview] = useState(true);
-  const resultRef = useRef<HTMLCanvasElement | null>(null);
+  /** Последний посчитанный результат и параметры, для которых он посчитан (OK берёт его без пересчёта). */
+  const resultRef = useRef<{ params: Params; r: { canvas: HTMLCanvasElement; area: Rect | null } } | null>(null);
   const layer = doc.activeLayer!;
 
   useEffect(() => {
@@ -233,13 +235,20 @@ function FilterDialog({ filterId }: { filterId: string }) {
       requestRender();
       return;
     }
-    // считаем с задержкой: тяжёлые фильтры не должны тормозить слайдеры
+    // считаем с задержкой и в фоновых потоках: тяжёлые фильтры не тормозят слайдеры; устаревший результат отбрасывается
+    let alive = true;
     const t = setTimeout(() => {
-      resultRef.current = A.filterResult(doc, doc.editSource(layer), filterId, params);
-      doc.preview = { layerId: layer.id, draw: (ctx) => resultRef.current && ctx.drawImage(resultRef.current, 0, 0) };
-      requestRender();
+      void A.filterResultAsync(doc, doc.editSource(layer), filterId, params).then((r) => {
+        if (!alive) return;
+        resultRef.current = { params, r };
+        doc.preview = { layerId: layer.id, draw: (ctx) => resultRef.current && ctx.drawImage(resultRef.current.r.canvas, 0, 0) };
+        requestRender();
+      });
     }, 50);
-    return () => clearTimeout(t);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
   }, [params, preview, doc, layer, filterId]);
 
   useEffect(() => () => {
@@ -249,7 +258,9 @@ function FilterDialog({ filterId }: { filterId: string }) {
 
   const ok = () => {
     doc.preview = null;
-    A.applyFilter(filterId, params);
+    // результат для этих параметров уже посчитан — применяем его, не пересчитывая
+    if (resultRef.current?.params === params) A.commitFilterResult(doc, layer.id, filterId, resultRef.current.r);
+    else A.applyFilter(filterId, params);
     closeDialog();
   };
   return (
@@ -650,6 +661,7 @@ export function Dialogs() {
     case 'shortcuts': return <ShortcutsDialog />;
     case 'about': return <AboutDialog />;
     case 'layer-style': return activeDoc()?.activeLayer ? <LayerStyleDialog /> : null;
+    case 'layer-props': return activeDoc()?.getLayer(d.layerId) ? <LayerPropsDialog layerId={d.layerId} /> : null;
     case 'color-range': return <ColorRangeDialog />;
     case 'cut-step': return <CutStepDialog />;
     case 'new-guide': return <NewGuideDialog />;

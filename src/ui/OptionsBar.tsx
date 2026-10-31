@@ -1,5 +1,8 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, Circle, Minus, MoveUpRight, Square } from 'lucide-react';
 import { FontPicker } from './FontPicker';
+import { GradientPicker } from './GradientPicker';
+import { GRADIENT_KINDS, type GradientKind } from '../core/gradient';
+import { useEffect, useRef } from 'react';
 import * as A from '../actions';
 import { activeDoc, openDialog, setFg, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
 import { applyTextOptsToLayer } from '../tools/fill';
@@ -81,6 +84,18 @@ function SelectModeSeg({ o }: { o: ToolOptions }) {
   );
 }
 
+/** Значок вида градиента — маленький квадрат с самим видом. */
+function GradientKindIcon({ kind }: { kind: GradientKind }) {
+  const bgs: Record<GradientKind, string> = {
+    linear: 'linear-gradient(90deg, #fff, #222)',
+    radial: 'radial-gradient(circle at 50% 50%, #fff, #222 70%)',
+    angle: 'conic-gradient(from 90deg, #fff, #222)',
+    reflected: 'linear-gradient(90deg, #222, #fff 50%, #222)',
+    diamond: 'conic-gradient(from 45deg, #ddd, #555 25%, #ddd 50%, #555 75%, #ddd)',
+  };
+  return <span className="grad-kind" style={{ background: bgs[kind] }} />;
+}
+
 /** Настройка «Текста» + применение к выбранному текстовому слою. */
 const setTextOpts = (patch: Partial<ToolOptions>) => {
   setOpts(patch);
@@ -89,6 +104,9 @@ const setTextOpts = (patch: Partial<ToolOptions>) => {
 
 export function OptionsBar() {
   const tool = useApp((s) => s.tool);
+  // подсказки на узком окне сокращаются многоточием — полный текст во всплывающей подсказке
+  const hintsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => hintsRef.current?.querySelectorAll<HTMLElement>(':scope > .note').forEach((n) => (n.title = n.textContent ?? '')));
   const o = useApp((s) => s.opts);
   const prefs = useApp((s) => s.prefs);
   const transform = useTransform();
@@ -189,8 +207,12 @@ export function OptionsBar() {
     case 'gradient':
       body = (
         <>
-          <Seg value={o.gradientKind} onChange={(v) => setOpts({ gradientKind: v })} options={[{ id: 'linear', label: 'Линейный' }, { id: 'radial', label: 'Радиальный' }]} />
-          <Check label="Основной → прозрачный" checked={o.gradientToTransparent} onChange={(v) => setOpts({ gradientToTransparent: v })} />
+          <GradientPicker />
+          <Seg
+            value={o.gradientKind}
+            onChange={(v) => setOpts({ gradientKind: v })}
+            options={GRADIENT_KINDS.map((k) => ({ id: k.id, label: <GradientKindIcon kind={k.id} />, title: k.label }))}
+          />
           <Check label="Инверсия" checked={o.gradientReverse} onChange={(v) => setOpts({ gradientReverse: v })} />
           <SliderField label="Непрозр." value={o.brushOpacity} min={1} max={100} onChange={(v) => setOpts({ brushOpacity: v })} suffix="%" />
         </>
@@ -401,7 +423,7 @@ export function OptionsBar() {
   const selTools = ['marquee-rect', 'marquee-ellipse', 'lasso', 'polygon-lasso', 'wand'];
   const hasSel = !!activeDoc()?.selection;
   return (
-    <div className="optionsbar">
+    <div className="optionsbar" ref={hintsRef}>
       <span className="tool-name">{label}</span>
       {body}
       {selTools.includes(tool) && (

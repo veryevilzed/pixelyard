@@ -1,51 +1,79 @@
-import { alphaBounds, createCanvas, ctx2d } from './canvas';
+import { createCanvas, ctx2d } from './canvas';
 import { blurImageData } from './filters';
 import type { Point, Rect, Selection, SelectMode } from './types';
 
-/** Строит выделение по маске; null, если маска пустая. */
-export function selectionFromMask(mask: HTMLCanvasElement): Selection | null {
-  const bounds = alphaBounds(mask, 0);
-  if (!bounds) return null;
-  return { mask, bounds, outline: buildOutline(mask, bounds) };
+/** Строит выделение по маске; null, если маска пустая. Границы и контур, если известны, можно передать. */
+export function selectionFromMask(mask: HTMLCanvasElement, known?: { bounds: Rect; outline: Path2D }): Selection | null {
+  if (known) return { mask, bounds: known.bounds, outline: known.outline };
+  const scan = scanMask(mask);
+  return scan && { mask, ...scan };
 }
 
 /**
- * Контур по границе пикселей с альфой > 127. Соседние горизонтальные/вертикальные
- * отрезки склеиваются, чтобы Path2D оставался компактным.
+ * Границы (альфа > 0) и контур по краю пикселей с альфой > 127 — за одно чтение маски.
+ * Соседние отрезки контура склеиваются, чтобы Path2D оставался компактным.
  */
-function buildOutline(mask: HTMLCanvasElement, b: Rect): Path2D {
+function scanMask(mask: HTMLCanvasElement): { bounds: Rect; outline: Path2D } | null {
   const w = mask.width, h = mask.height;
-  const d = ctx2d(mask).getImageData(0, 0, w, h).data;
-  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && d[(y * w + x) * 4 + 3] > 127;
+  const px = new Uint32Array(ctx2d(mask).getImageData(0, 0, w, h).data.buffer);
+  // альфа — старший байт (порядок байтов little-endian, как на всех нынешних машинах)
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let x = 0;
+    while (x < w && px[row + x] >>> 24 === 0) x++;
+    if (x === w) continue;
+    let x2 = w - 1;
+    while (px[row + x2] >>> 24 === 0) x2--;
+    if (x < minX) minX = x;
+    if (x2 > maxX) maxX = x2;
+    if (y < minY) minY = y;
+    maxY = y;
+  }
+  if (maxX < 0) return null;
+  const bounds = { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+  // сетка «внутри» с рамкой в 1 пиксель вокруг границ
+  const gx0 = minX - 1, gy0 = minY - 1, gw = bounds.w + 2, gh = bounds.h + 2;
+  const g = new Uint8Array(gw * gh);
+  for (let y = minY; y <= maxY; y++) {
+    const src = y * w, dst = (y - gy0) * gw - gx0;
+    for (let x = minX; x <= maxX; x++) if (px[src + x] >>> 24 > 127) g[dst + x] = 1;
+  }
   const p = new Path2D();
-  const x0 = Math.max(0, b.x - 1), x1 = Math.min(w, b.x + b.w + 1);
-  const y0 = Math.max(0, b.y - 1), y1 = Math.min(h, b.y + b.h + 1);
-  // горизонтальные границы между строками y-1 и y
-  for (let y = y0; y <= y1; y++) {
+  // горизонтальные границы между строками r-1 и r
+  for (let r = 1; r < gh; r++) {
+    const a = (r - 1) * gw, c = r * gw;
     let start = -1;
-    for (let x = x0; x <= x1; x++) {
-      const edge = x < x1 && inside(x, y) !== inside(x, y - 1);
+    for (let x = 0; x <= gw; x++) {
+      const edge = x < gw && g[a + x] !== g[c + x];
       if (edge && start < 0) start = x;
       else if (!edge && start >= 0) {
-        p.moveTo(start, y);
-        p.lineTo(x, y);
+        p.moveTo(gx0 + start, gy0 + r);
+        p.lineTo(gx0 + x, gy0 + r);
         start = -1;
       }
     }
   }
-  // вертикальные границы между столбцами x-1 и x
-  for (let x = x0; x <= x1; x++) {
+  // вертикальные границы между столбцами c-1 и c
+  for (let c = 1; c < gw; c++) {
     let start = -1;
-    for (let y = y0; y <= y1; y++) {
-      const edge = y < y1 && inside(x, y) !== inside(x - 1, y);
-      if (edge && start < 0) start = y;
+    for (let r = 0; r <= gh; r++) {
+      const edge = r < gh && g[r * gw + c] !== g[r * gw + c - 1];
+      if (edge && start < 0) start = r;
       else if (!edge && start >= 0) {
-        p.moveTo(x, start);
-        p.lineTo(x, y);
+        p.moveTo(gx0 + c, gy0 + start);
+        p.lineTo(gx0 + c, gy0 + r);
         start = -1;
       }
     }
   }
+  return { bounds, outline: p };
+}
+
+/** Контур прямоугольника (выделить всё, прямоугольная рамка). */
+function rectOutline(r: Rect): Path2D {
+  const p = new Path2D();
+  p.rect(r.x, r.y, r.w, r.h);
   return p;
 }
 
@@ -92,10 +120,12 @@ export function combineSelection(
   current: Selection | null,
   shape: HTMLCanvasElement,
   mode: SelectMode,
+  /** Маска — ровно этот прямоугольник (рамка): границы и контур известны без чтения маски. */
+  rect?: Rect,
 ): Selection | null {
   if (mode === 'replace' || !current) {
     if (mode === 'subtract' || mode === 'intersect') return mode === 'intersect' ? null : current;
-    return selectionFromMask(shape);
+    return selectionFromMask(shape, rect ? { bounds: rect, outline: rectOutline(rect) } : undefined);
   }
   const out = createCanvas(shape.width, shape.height);
   const ctx = ctx2d(out);
@@ -110,7 +140,8 @@ export function selectAll(w: number, h: number): Selection {
   const m = createCanvas(w, h);
   const ctx = ctx2d(m);
   ctx.fillRect(0, 0, w, h);
-  return selectionFromMask(m)!;
+  const bounds = { x: 0, y: 0, w, h };
+  return selectionFromMask(m, { bounds, outline: rectOutline(bounds) })!;
 }
 
 export function invertSelection(sel: Selection | null, w: number, h: number): Selection | null {
