@@ -618,6 +618,75 @@ export function autoColor(img: ImageData) {
 
 const lumOf = (r: number, g: number, b: number) => 0.299 * r + 0.587 * g + 0.114 * b;
 
+/**
+ * Автоулучшение (как Auto Enhance в Pixelmator): уровни по яркости с лёгкой поправкой каналов,
+ * средние тона к нормальной яркости, мягкий баланс белого и сочность.
+ * strength: 0 — без изменений, 1 — обычная сила, до 2 — сильнее.
+ */
+export function autoEnhance(img: ImageData, strength = 1) {
+  const k = Math.max(0, Math.min(2, strength));
+  if (!k) return;
+  const h = histogram(img);
+  const count = h.l.reduce((a, v) => a + v, 0);
+  if (!count) return;
+  // 1) уровни: общая чёрная/белая точка по яркости + доля поканальной (убирает цветную вуаль)
+  let [ll, lh] = bounds(h.l, 0.004);
+  // блёклую картинку растягиваем не больше чем в ~1,7 раза (иначе «кислотные» цвета)
+  const MIN_RANGE = 150;
+  if (lh - ll < MIN_RANGE) {
+    const mid = (ll + lh) / 2;
+    ll = Math.max(0, mid - MIN_RANGE / 2);
+    lh = Math.min(255, ll + MIN_RANGE);
+    ll = lh - MIN_RANGE;
+  }
+  const ch = [bounds(h.r, 0.004), bounds(h.g, 0.004), bounds(h.b, 0.004)];
+  const mix = 0.2;
+  const pts = ch.map(([lo, hi]) => [ll + (lo - ll) * mix, lh + (hi - lh) * mix]);
+  // 2) средние тона: средняя яркость после уровней → к ~0.47 гаммой (в разумных пределах)
+  let sum = 0;
+  for (let v = 0; v < 256; v++) sum += h.l[v] * Math.min(1, Math.max(0, (v - ll) / Math.max(1, lh - ll)));
+  const mean = Math.min(0.95, Math.max(0.05, sum / count));
+  const gamma = Math.min(1.45, Math.max(0.7, Math.log(0.47) / Math.log(mean)));
+  // 3) серый мир — слабо: средний цвет немного к нейтральному
+  const d = img.data;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < d.length; i += 16) {
+    if (d[i + 3] < 8) continue;
+    r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+  }
+  const avg = n ? (r + g + b) / (3 * n) : 1;
+  const wb = n ? [r, g, b].map((c) => Math.pow(avg / Math.max(1, c / n), 0.3)) : [1, 1, 1];
+  const luts = pts.map(([lo, hi], c) =>
+    lut((v) => {
+      const t = Math.min(1, Math.max(0, (v - lo) / Math.max(1, hi - lo)));
+      const out = 255 * Math.pow(t, gamma) * wb[c];
+      // обычная сила — 3/4 пути до полной коррекции: мягче, без «выжженного» вида
+      return v + (out - v) * Math.min(1, 0.75 * k);
+    }),
+  );
+  const vib = 0.18 * k;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    let R = luts[0][d[i]], G = luts[1][d[i + 1]], B = luts[2][d[i + 2]];
+    // 4) сочность: блёклые цвета насыщаются сильнее, яркие почти не трогаем
+    const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+    const sat = mx ? (mx - mn) / mx : 0;
+    const amt = vib * (1 - sat);
+    const L = lumOf(R, G, B);
+    R = L + (R - L) * (1 + amt);
+    G = L + (G - L) * (1 + amt);
+    B = L + (B - L) * (1 + amt);
+    if (k > 1) {
+      // сверх обычной силы — ещё немного контраста по S-кривой
+      const c = (k - 1) * 0.15;
+      R += (R - 128) * c; G += (G - 128) * c; B += (B - 128) * c;
+    }
+    d[i] = clamp255(R);
+    d[i + 1] = clamp255(G);
+    d[i + 2] = clamp255(B);
+  }
+}
+
 const TONE_OPTIONS = [
   { id: 'shadows', label: 'Тени' },
   { id: 'midtones', label: 'Средние тона' },
@@ -898,6 +967,15 @@ FILTERS.push(
         const adj = (v: number, k: number) => v - a * k * (rel ? v : 255) - a * K * (rel ? v : 255);
         return [adj(r, C), adj(g, M), adj(b, Y)];
       });
+    },
+  },
+  {
+    id: 'auto-enhance',
+    label: 'Автоулучшение',
+    group: 'auto',
+    params: [{ key: 'strength', label: 'Сила, %', type: 'range', min: 0, max: 200, default: 100 }],
+    apply(img, p) {
+      autoEnhance(img, num(p, 'strength') / 100);
     },
   },
   {

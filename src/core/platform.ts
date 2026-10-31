@@ -233,3 +233,43 @@ export async function quitWithConfirm(dirtyNames: string[]): Promise<void> {
   }
   await invoke('quit_app');
 }
+
+/** Самые ходовые шрифты macOS — список для браузера (в программе список берётся у системы). */
+const COMMON_FONTS = [
+  'American Typewriter', 'Arial', 'Arial Black', 'Arial Rounded MT Bold', 'Avenir', 'Avenir Next', 'Avenir Next Condensed', 'Baskerville', 'Big Caslon',
+  'Chalkboard SE', 'Chalkduster', 'Charter', 'Cochin', 'Comic Sans MS', 'Copperplate', 'Courier New', 'Didot', 'Futura', 'Geneva', 'Georgia', 'Gill Sans',
+  'Helvetica', 'Helvetica Neue', 'Herculanum', 'Hoefler Text', 'Impact', 'Iowan Old Style', 'Lucida Grande', 'Marker Felt', 'Menlo', 'Monaco', 'Noteworthy',
+  'Optima', 'Palatino', 'Papyrus', 'Phosphate', 'PT Mono', 'PT Sans', 'PT Serif', 'Rockwell', 'SF Pro', 'SF Mono', 'Skia', 'Snell Roundhand', 'Tahoma',
+  'Times New Roman', 'Trattatello', 'Trebuchet MS', 'Verdana', 'Zapfino',
+];
+
+/** Есть ли шрифт: ширина образца отличается от запасного шрифта. */
+function fontInstalled(name: string) {
+  const c = document.createElement('canvas').getContext('2d')!;
+  const sample = 'mmmmmmmmmmlliWW Шрифт 123';
+  return ['monospace', 'serif'].some((fb) => {
+    c.font = `40px ${fb}`;
+    const base = c.measureText(sample).width;
+    c.font = `40px "${name}", ${fb}`;
+    return c.measureText(sample).width !== base;
+  });
+}
+
+let fontsCache: Promise<string[]> | null = null;
+
+/** Семейства установленных шрифтов (один раз за сессию). */
+export function systemFonts(): Promise<string[]> {
+  fontsCache ??= (async () => {
+    if (isTauri) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const list = await invoke<string[]>('list_fonts');
+        if (list.length) return list;
+      } catch {
+        /* старая сборка без команды — как в браузере */
+      }
+    }
+    return COMMON_FONTS.filter(fontInstalled);
+  })();
+  return fontsCache;
+}

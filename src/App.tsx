@@ -14,6 +14,7 @@ import { MenuBar } from './ui/MenuBar';
 import { TabDragLayer, Workspace } from './ui/Panes';
 import { OptionsBar } from './ui/OptionsBar';
 import { Sidebar } from './ui/Sidebar';
+import { CanvasMenu } from './ui/CanvasMenu';
 import { StatusBar } from './ui/StatusBar';
 import { Toolbox } from './ui/Toolbox';
 import { isTyping } from './ui/Viewport';
@@ -154,6 +155,7 @@ export function App() {
       </div>
       <StatusBar />
       <Dialogs />
+      <CanvasMenu />
       <TabDragLayer />
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       {busy && (

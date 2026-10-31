@@ -9,10 +9,11 @@ import type { Cuts, NineSlice } from '../core/types';
 import { usePatterns } from '../core/patterns';
 import { activeDoc, app, setPrefs, useApp, useCursor } from '../store';
 import { changed, getPickHook, onRenderRequest, requestRender, snapPoint, type PointerInfo, type Tool } from '../tools/base';
-import { bitmapFontId, cancelText, commitText, handTool, textFont, useTextEdit } from '../tools/fill';
+import { bitmapFontId, cancelText, commitText, editLayout, handTool, textBlurred, useTextEdit } from '../tools/fill';
 import { effectiveTool } from '../tools';
 import { useTransform } from '../tools/transform';
 import { useCrop } from '../tools/crop';
+import { openCanvasMenu } from './CanvasMenu';
 
 /** Пробел зажат — временно «рука». */
 let spaceDown = false;
@@ -403,7 +404,12 @@ export function Viewport({ paneId }: { paneId: string }) {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('gesturestart', onGestureStart);
     canvas.addEventListener('gesturechange', onGestureChange);
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // правая кнопка — контекстное меню (в другой области — сначала перевести туда фокус)
+      if (!focused()) focusPaneAction(paneId);
+      if (paneDoc() && !dragging) openCanvasMenu(e.clientX, e.clientY);
+    });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
@@ -448,10 +454,11 @@ export function isTyping() {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || (el as HTMLElement).isContentEditable);
 }
 
-/** Поле ввода текста поверх холста для инструмента «Текст». */
+/** Поле ввода текста поверх холста для инструмента «Текст»: по размеру и выравниванию — как итоговый текст. */
 function TextEditor() {
   const at = useTextEdit((s) => s.at);
   const value = useTextEdit((s) => s.value);
+  const box = useTextEdit((s) => s.box);
   useApp((s) => s.tick);
   const opts = useApp((s) => s.opts);
   const fg = useApp((s) => s.fg);
@@ -463,36 +470,84 @@ function TextEditor() {
     return () => clearTimeout(t);
   }, [at]);
   const doc = activeDoc();
-  if (!at || !doc) return null;
+  const L = at ? editLayout() : null;
+  if (!at || !doc || !L) return null;
   const v = doc.view;
-  const lines = value.split('\n');
-  const fontPx = opts.textSize * v.zoom;
-  const longest = Math.max(4, ...lines.map((l) => l.length));
+  const z = v.zoom;
+  const bm = !!bitmapFontId();
+  const lh = L.lineHeight * z;
+  const align = opts.textAlign;
+  // точечный текст: запас под следующую букву с той стороны, куда текст растёт
+  const slack = box ? 0 : Math.max(8, opts.textSize * 0.6 * z);
+  const b = L.bounds;
+  let left = v.panX + b.x * z, width = b.w * z + slack;
+  if (!box && align === 'center') left -= slack / 2;
+  if (!box && align === 'right') left -= slack;
+  const top = v.panY + b.y * z;
+  const padTop = box ? Math.max(0, (L.lines[0]?.y ?? b.y) - b.y) * z : 0;
+  const height = Math.max(lh, box ? Math.max(b.h * z, padTop + L.lines.length * lh) : L.lines.length * lh);
+  const cssColor = `rgb(${fg[0]},${fg[1]},${fg[2]})`;
+  const family = bm ? '-apple-system, sans-serif' : opts.textFont;
+
+  // ручки рамки: тянем край — меняется размер (поле ввода не теряет фокус)
+  const startResize = (e: React.PointerEvent, sx: -1 | 0 | 1, sy: -1 | 0 | 1) => {
+    if (!box) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = { x: e.clientX, y: e.clientY, at: { ...at }, box: { ...box } };
+    const move = (ev: PointerEvent) => {
+      const dx = (ev.clientX - start.x) / z, dy = (ev.clientY - start.y) / z;
+      const w = Math.max(8, Math.round(start.box.w + sx * dx)), h = Math.max(8, Math.round(start.box.h + sy * dy));
+      useTextEdit.setState({
+        box: { w, h },
+        at: { x: sx < 0 ? start.at.x + start.box.w - w : start.at.x, y: sy < 0 ? start.at.y + start.box.h - h : start.at.y },
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   return (
-    <textarea
-      ref={ref}
-      className="text-editor"
-      value={value}
-      spellCheck={false}
-      style={{
-        left: v.panX + at.x * v.zoom,
-        top: v.panY + at.y * v.zoom,
-        font: textFont().replace(`${opts.textSize}px`, `${fontPx}px`),
-        color: bitmapFontId() ? 'transparent' : `rgb(${fg[0]},${fg[1]},${fg[2]})`,
-        caretColor: `rgb(${fg[0]},${fg[1]},${fg[2]})`,
-        width: longest * fontPx * 0.65 + 20,
-        height: lines.length * fontPx * 1.25 + 4,
-      }}
-      onChange={(e) => {
-        useTextEdit.setState({ value: e.target.value });
-        requestRender();
-      }}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape') cancelText(doc);
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitText(doc);
-      }}
-      onBlur={() => commitText(doc)}
-    />
+    <div className={`text-editor-wrap ${box ? 'boxed' : ''}`} style={{ left, top, width, height }}>
+      <textarea
+        ref={ref}
+        className="text-editor"
+        value={value}
+        spellCheck={false}
+        wrap={box ? 'soft' : 'off'}
+        style={{
+          font: `${opts.textItalic && !bm ? 'italic ' : ''}${opts.textBold && !bm ? 'bold ' : ''}${opts.textSize * z}px ${family}`,
+          lineHeight: `${lh}px`,
+          textAlign: !box && align === 'justify' ? 'left' : align,
+          whiteSpace: box ? 'pre-wrap' : 'pre',
+          paddingTop: padTop,
+          color: bm ? 'transparent' : cssColor,
+          caretColor: cssColor,
+        }}
+        onChange={(e) => {
+          useTextEdit.setState({ value: e.target.value });
+          requestRender();
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Escape') cancelText(doc);
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitText(doc);
+        }}
+        onBlur={() => textBlurred(doc)}
+      />
+      {box &&
+        ([[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]] as const).map(([sx, sy]) => (
+          <div
+            key={`${sx}${sy}`}
+            className="text-box-handle"
+            style={{ left: `${(sx + 1) * 50}%`, top: `${(sy + 1) * 50}%`, cursor: sx === 0 ? 'ns-resize' : sy === 0 ? 'ew-resize' : sx === sy ? 'nwse-resize' : 'nesw-resize' }}
+            onPointerDown={(e) => startResize(e, sx, sy)}
+          />
+        ))}
+    </div>
   );
 }

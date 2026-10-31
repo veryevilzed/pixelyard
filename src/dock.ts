@@ -6,10 +6,10 @@ import { create } from 'zustand';
  */
 
 export type DockMode = 'image' | 'atlas';
-export type PanelId = 'navigator' | 'color' | 'layers' | 'slices' | 'nine' | 'history' | 'atlas' | 'sprite' | 'anims' | 'atlasExport';
+export type PanelId = 'navigator' | 'color' | 'effects' | 'layers' | 'slices' | 'nine' | 'history' | 'atlas' | 'sprite' | 'anims' | 'atlasExport';
 
 export const MODE_PANELS: Record<DockMode, PanelId[]> = {
-  image: ['navigator', 'color', 'layers', 'slices', 'nine', 'history'],
+  image: ['navigator', 'color', 'effects', 'layers', 'slices', 'nine', 'history'],
   atlas: ['navigator', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'],
 };
 
@@ -21,6 +21,8 @@ interface DockLayout {
   /** Колонки слева направо, в каждой — панели сверху вниз. */
   cols: PanelId[][];
   widths: number[];
+  /** Панели, скрытые через меню «Окно» или крестик в заголовке (место в колонке сохраняется). */
+  hidden: PanelId[];
 }
 
 interface DockState {
@@ -29,7 +31,7 @@ interface DockState {
 
 const KEY = 'pixelyard.dock';
 
-const defaults = (mode: DockMode): DockLayout => ({ cols: [MODE_PANELS[mode]], widths: [COL_DEFAULT] });
+const defaults = (mode: DockMode): DockLayout => ({ cols: [MODE_PANELS[mode]], widths: [COL_DEFAULT], hidden: [] });
 
 /** Чинит сохранённую раскладку: убирает чужие/повторные панели, добавляет недостающие, пустые колонки схлопывает. */
 function normalize(mode: DockMode, l: DockLayout | undefined): DockLayout {
@@ -47,7 +49,8 @@ function normalize(mode: DockMode, l: DockLayout | undefined): DockLayout {
   if (!cols.length) return defaults(mode);
   const missing = MODE_PANELS[mode].filter((p) => !seen.has(p));
   if (missing.length) cols[cols.length - 1] = [...cols[cols.length - 1], ...missing];
-  return { cols, widths };
+  const hidden = (Array.isArray(l.hidden) ? l.hidden : []).filter((p) => allowed.has(p));
+  return { cols, widths, hidden };
 }
 
 function load(): DockState['layouts'] {
@@ -96,8 +99,15 @@ export function movePanel(mode: DockMode, id: PanelId, col: number, index: numbe
     cols[from].splice(fromIdx, 1);
     cols[col].splice(Math.max(0, Math.min(at, cols[col].length)), 0, id);
   }
-  setLayout(mode, { cols, widths });
+  setLayout(mode, { cols, widths, hidden: l.hidden.filter((p) => p !== id) });
 }
+
+export function setPanelHidden(mode: DockMode, id: PanelId, hide: boolean) {
+  const l = useDock.getState().layouts[mode];
+  setLayout(mode, { ...l, hidden: hide ? [...l.hidden.filter((p) => p !== id), id] : l.hidden.filter((p) => p !== id) });
+}
+
+export const isPanelHidden = (mode: DockMode, id: PanelId) => useDock.getState().layouts[mode].hidden.includes(id);
 
 export function setColWidth(mode: DockMode, col: number, w: number) {
   const l = useDock.getState().layouts[mode];
@@ -108,10 +118,10 @@ export function setColWidth(mode: DockMode, col: number, w: number) {
 /** Одна колонка ↔ две (панели делятся пополам: вторая половина уходит в левую колонку). */
 export function toggleTwoColumns(mode: DockMode) {
   const l = useDock.getState().layouts[mode];
-  if (l.cols.length > 1) return setLayout(mode, { cols: [l.cols.flat()], widths: [Math.max(...l.widths)] });
+  if (l.cols.length > 1) return setLayout(mode, { ...l, cols: [l.cols.flat()], widths: [Math.max(...l.widths)] });
   const all = l.cols[0];
   const half = Math.ceil(all.length / 2);
-  setLayout(mode, { cols: [all.slice(half), all.slice(0, half)], widths: [COL_DEFAULT, l.widths[0]] });
+  setLayout(mode, { ...l, cols: [all.slice(half), all.slice(0, half)], widths: [COL_DEFAULT, l.widths[0]] });
 }
 
 export function resetDock(mode: DockMode) {

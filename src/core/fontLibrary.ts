@@ -186,6 +186,12 @@ function lineWidth(f: RenderedFont, line: string, kern: Map<string, number>, spa
   return x;
 }
 
+/** Ширина строки растровым шрифтом с учётом масштаба (для выравнивания и переноса). */
+export function bitmapTextWidth(f: RenderedFont, line: string, o: Pick<BitmapTextOptions, 'scale' | 'letterSpacing'>) {
+  const kern = new Map(f.kernings.map((k) => [`${k.first}:${k.second}`, k.amount]));
+  return lineWidth(f, line, kern, o.letterSpacing) * o.scale;
+}
+
 /** Рисует текст глифами шрифта; возвращает размер нарисованного. */
 export function drawBitmapText(ctx: CanvasRenderingContext2D, f: RenderedFont, text: string, x: number, y: number, o: BitmapTextOptions) {
   const map = new Map(f.glyphs.map((g) => [g.id, g]));

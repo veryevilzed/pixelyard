@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Doc } from './core/doc';
-import type { RGBA } from './core/types';
+import type { RGBA, TextAlign, TextVAlign } from './core/types';
 import type { LoadedFile } from './core/platform';
 
 export type ToolId =
@@ -80,6 +80,8 @@ export interface ToolOptions {
   textAntialias: boolean;
   /** Растровый шрифт: перекрашивать глифы в основной цвет. */
   textBmTint: boolean;
+  textAlign: TextAlign;
+  textVAlign: TextVAlign;
   moveAutoSelect: boolean;
   knifeDir: 'vertical' | 'horizontal';
   eyedropperMerged: boolean;
@@ -138,6 +140,8 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   textItalic: false,
   textAntialias: true,
   textBmTint: false,
+  textAlign: 'left',
+  textVAlign: 'top',
   moveAutoSelect: false,
   knifeDir: 'vertical',
   eyedropperMerged: true,
@@ -217,7 +221,7 @@ interface AppState {
   dialog: DialogState | null;
   toast: { text: string; kind: 'info' | 'error'; id: number } | null;
   busy: string | null;
-  panels: { navigator: boolean; color: boolean; layers: boolean; slices: boolean; history: boolean; info: boolean; nine: boolean; atlas: boolean; sprite: boolean; anims: boolean; atlasExport: boolean };
+  panels: { navigator: boolean; color: boolean; effects: boolean; layers: boolean; slices: boolean; history: boolean; info: boolean; nine: boolean; atlas: boolean; sprite: boolean; anims: boolean; atlasExport: boolean };
 }
 
 const savedOpts = (() => {
@@ -273,7 +277,7 @@ export const useApp = create<AppState>(() => ({
   dialog: null,
   toast: null,
   busy: null,
-  panels: { navigator: true, color: true, layers: true, slices: true, history: true, info: true, nine: false, atlas: true, sprite: true, anims: true, atlasExport: true },
+  panels: { navigator: true, color: true, effects: false, layers: true, slices: true, history: true, info: true, nine: false, atlas: true, sprite: true, anims: true, atlasExport: true },
 }));
 
 useApp.subscribe((s, prev) => {

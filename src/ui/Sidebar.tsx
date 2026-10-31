@@ -1,11 +1,12 @@
-import { ChevronRight, GripVertical } from 'lucide-react';
+import { ChevronRight, GripVertical, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import { activeDoc, useApp } from '../store';
 import { isAtlas } from '../core/atlasDoc';
-import { movePanel, setColWidth, useDock, type DockMode, type PanelId } from '../dock';
+import { movePanel, setColWidth, setPanelHidden, useDock, type DockMode, type PanelId } from '../dock';
 import { AnimationsActions, AnimationsPanel, AtlasActions, AtlasExportPanel, AtlasPanel, SpritePanel } from './panels/AtlasPanel';
 import { ColorPanel } from './panels/ColorPanel';
+import { EffectsPanel } from './panels/EffectsPanel';
 import { Navigator } from './panels/Navigator';
 import { HistoryPanel } from './panels/HistoryPanel';
 import { LayersActions, LayersPanel } from './panels/LayersPanel';
@@ -17,12 +18,15 @@ interface PanelDef {
   body: () => ReactNode;
   actions?: () => ReactNode;
   grow?: boolean;
+  /** Кнопки — полосой внизу панели (как в Photoshop), а не в заголовке: их много, в заголовок не влезают. */
+  footer?: boolean;
 }
 
 export const PANELS: Record<PanelId, PanelDef> = {
   navigator: { title: 'Навигатор', body: () => <Navigator /> },
   color: { title: 'Цвет', body: () => <ColorPanel /> },
-  layers: { title: 'Слои', body: () => <LayersPanel />, actions: () => <LayersActions />, grow: true },
+  effects: { title: 'Браузер эффектов', body: () => <EffectsPanel /> },
+  layers: { title: 'Слои', body: () => <LayersPanel />, actions: () => <LayersActions />, grow: true, footer: true },
   slices: { title: 'Слайсы', body: () => <SlicesPanel />, actions: () => <SlicesActions /> },
   nine: { title: '9-slice', body: () => <NinePanel /> },
   history: { title: 'История', body: () => <HistoryPanel /> },
@@ -50,15 +54,16 @@ function dropTarget(x: number, y: number): DropTarget | null {
     const r = el.getBoundingClientRect();
     if (x < r.left || x >= r.right) continue;
     const panels = [...el.querySelectorAll<HTMLElement>(':scope > .panel')];
-    let index = panels.length;
-    for (const [pi, p] of panels.entries()) {
+    // индексы — в раскладке колонки (скрытые панели в DOM не попадают)
+    let index = Number(el.dataset.len);
+    for (const p of panels) {
       const pr = p.getBoundingClientRect();
       if (y < pr.top + Math.min(pr.height / 2, 40)) {
-        index = pi;
+        index = Number(p.dataset.index);
         break;
       }
     }
-    return { col: ci, index };
+    return { col: Number(el.dataset.col ?? ci), index };
   }
   return null;
 }
@@ -84,24 +89,36 @@ function startPanelDrag(e: React.PointerEvent, mode: DockMode, id: PanelId, onCl
   window.addEventListener('pointerup', up);
 }
 
-function Panel({ id, mode, dropBefore }: { id: PanelId; mode: DockMode; dropBefore: boolean }) {
+function Panel({ id, mode, index, dropBefore }: { id: PanelId; mode: DockMode; index: number; dropBefore: boolean }) {
   const def = PANELS[id];
   const open = useApp((s) => s.panels[id]);
   const dragged = usePanelDrag((s) => s.id === id);
   const toggle = () => useApp.setState((s) => ({ panels: { ...s.panels, [id]: !s.panels[id] } }));
   return (
-    <div className={`panel ${open && def.grow ? 'grow' : ''} ${dragged ? 'dragged' : ''} ${dropBefore ? 'drop-before' : ''}`} data-panel={id}>
+    <div className={`panel ${open && def.grow ? 'grow' : ''} ${dragged ? 'dragged' : ''} ${dropBefore ? 'drop-before' : ''}`} data-panel={id} data-index={index}>
       <div className="panel-head" onPointerDown={(e) => startPanelDrag(e, mode, id, toggle)} title="Клик — свернуть, перетаскивание — в другое место или колонку">
         <ChevronRight size={12} className={`chev ${open ? 'open' : ''}`} />
         {def.title}
         <GripVertical size={12} className="grip" />
-        {open && def.actions && (
+        {open && def.actions && !def.footer && (
           <span className="actions" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
             {def.actions()}
           </span>
         )}
+        <button
+          className="icon-btn panel-close"
+          title="Скрыть панель (вернуть — меню «Окно»)"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setPanelHidden(mode, id, true);
+          }}
+        >
+          <X size={11} />
+        </button>
       </div>
       {open && def.body()}
+      {open && def.actions && def.footer && <div className="panel-foot">{def.actions()}</div>}
     </div>
   );
 }
@@ -134,16 +151,17 @@ export function Sidebar() {
   // атлас: свои панели вместо цвета, слоёв и слайсов
   const mode: DockMode = isAtlas(activeDoc()) ? 'atlas' : 'image';
   const layout = useDock((s) => s.layouts[mode]);
+  const hidden = layout.hidden;
   const drag = usePanelDrag();
   const t = drag.target;
   return (
     <div className={`dock ${drag.id ? 'dragging' : ''}`}>
       {drag.id && <div className={`dock-new-col ${t?.col === -1 ? 'hot' : ''}`}>+</div>}
-      {layout.cols.map((col, ci) => (
-        <div key={ci} className={`sidebar ${mode === 'atlas' ? 'atlas-side' : ''} ${t && t.col === ci ? 'drop-col' : ''}`} style={{ width: layout.widths[ci] }}>
+      {layout.cols.map((col, ci) => col.every((id) => hidden.includes(id)) ? null : (
+        <div key={ci} data-col={ci} className={`sidebar ${mode === 'atlas' ? 'atlas-side' : ''} ${t && t.col === ci ? 'drop-col' : ''}`} style={{ width: layout.widths[ci] }} data-len={col.length}>
           <ColResizer mode={mode} col={ci} width={layout.widths[ci]} />
-          {col.map((id, pi) => (
-            <Panel key={id} id={id} mode={mode} dropBefore={!!t && t.col === ci && t.index === pi} />
+          {col.filter((id) => !hidden.includes(id)).map((id) => (
+            <Panel key={id} id={id} mode={mode} index={col.indexOf(id)} dropBefore={!!t && t.col === ci && t.index === col.indexOf(id)} />
           ))}
           <div className={`dock-tail ${t && t.col === ci && t.index === col.length ? 'drop-before' : ''}`} />
         </div>

@@ -25,6 +25,30 @@ extern "C" {
     fn CGEventSourceFlagsState(state_id: i32) -> u64;
 }
 
+/// Семейства шрифтов, установленных в системе (для выбора шрифта в «Тексте»).
+#[tauri::command]
+fn list_fonts() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_foundation::{NSArray, NSString};
+        #[link(name = "CoreText", kind = "framework")]
+        extern "C" {
+            fn CTFontManagerCopyAvailableFontFamilyNames() -> *mut NSArray<NSString>;
+        }
+        // CFArray<CFString> бесплатно приводится к NSArray<NSString>; Copy-функция — владеем результатом
+        let list = unsafe { Retained::from_raw(CTFontManagerCopyAvailableFontFamilyNames()) };
+        let mut names: Vec<String> = list
+            .map(|a| a.iter().map(|s| s.to_string()).filter(|n| !n.starts_with('.')).collect())
+            .unwrap_or_default();
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup();
+        return names;
+    }
+    #[allow(unreachable_code)]
+    Vec::new()
+}
+
 #[tauri::command]
 fn modifier_keys() -> Modifiers {
     #[cfg(target_os = "macos")]
@@ -128,6 +152,7 @@ pub fn run() {
             encode_webp,
             take_opened_files,
             modifier_keys,
+            list_fonts,
             print_webview,
             quit_app,
             #[cfg(target_os = "macos")]

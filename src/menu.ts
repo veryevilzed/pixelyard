@@ -1,11 +1,11 @@
 import * as A from './actions';
 import * as P from './panes';
-import { FILTERS } from './core/filters';
+import { defaultParams, FILTERS } from './core/filters';
 import { LABEL_COLORS } from './core/types';
 import { activeDoc, app, openDialog, setOpts, setPrefs, toast, useApp, type ToolId } from './store';
 import { changed } from './tools/base';
 import * as AT from './atlasActions';
-import { MODE_PANELS, resetDock, toggleTwoColumns, useDock } from './dock';
+import { isPanelHidden, MODE_PANELS, resetDock, setPanelHidden, toggleTwoColumns, useDock } from './dock';
 import { removeFont, useFonts } from './core/fontLibrary';
 import { isAtlas, selectedSprites, updateAtlas } from './core/atlasDoc';
 import { detectAnimations } from './core/atlas';
@@ -38,6 +38,7 @@ const hasAtlas = () => !!atlas();
 const dockMode = () => (atlas() ? 'atlas' : 'image');
 const hasSprites = () => (atlas()?.atlasSel.length ?? 0) > 0;
 const ADJUST_KEYS: Record<string, string> = {
+  'auto-enhance': 'Shift+Mod+A',
   levels: 'Mod+L',
   curves: 'Mod+M',
   'hue-saturation': 'Mod+U',
@@ -139,7 +140,13 @@ export const MENUS: Menu[] = [
           shortcut: ADJUST_KEYS[f.id],
         })),
       },
-      ...FILTERS.filter((f) => f.group === 'auto').map((f) => ({ label: f.label, action: () => A.runFilter(f.id), enabled: hasLayer, shortcut: ADJUST_KEYS[f.id] })),
+      ...FILTERS.filter((f) => f.group === 'auto').map((f) => ({
+        label: f.label,
+        // автоулучшение — одним нажатием (силу можно подобрать в «Браузере эффектов»)
+        action: () => (f.id === 'auto-enhance' ? A.applyFilter(f.id, defaultParams(f)) : A.runFilter(f.id)),
+        enabled: hasLayer,
+        shortcut: ADJUST_KEYS[f.id],
+      })),
       'sep',
       { label: 'Размер изображения…', shortcut: 'Alt+Mod+I', action: () => openDialog({ kind: 'image-size' }), enabled: hasImg },
       { label: 'Размер холста…', shortcut: 'Alt+Mod+C', action: () => openDialog({ kind: 'canvas-size' }), enabled: hasImg },
@@ -414,10 +421,15 @@ export const MENUS: Menu[] = [
       { label: 'Панели в две колонки', action: () => toggleTwoColumns(dockMode()), checked: () => useDock.getState().layouts[dockMode()].cols.length > 1 },
       { label: 'Сбросить раскладку панелей', action: () => resetDock(dockMode()) },
       'sep',
-      ...(['navigator', 'color', 'layers', 'slices', 'nine', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'] as const).map((k) => ({
-        label: { navigator: 'Навигатор', color: 'Цвет', layers: 'Слои', slices: 'Слайсы', nine: '9-slice', atlas: 'Спрайты', sprite: 'Свойства спрайта', anims: 'Анимации', atlasExport: 'Выгрузка атласа', history: 'История' }[k],
-        action: () => useApp.setState((s) => ({ panels: { ...s.panels, [k]: !s.panels[k] } })),
-        checked: () => useApp.getState().panels[k],
+      ...(['navigator', 'color', 'effects', 'layers', 'slices', 'nine', 'atlas', 'sprite', 'anims', 'atlasExport', 'history'] as const).map((k) => ({
+        label: { navigator: 'Навигатор', color: 'Цвет', effects: 'Браузер эффектов', layers: 'Слои', slices: 'Слайсы', nine: '9-slice', atlas: 'Спрайты', sprite: 'Свойства спрайта', anims: 'Анимации', atlasExport: 'Выгрузка атласа', history: 'История' }[k],
+        // показать/скрыть панель целиком (свернуть-развернуть — клик по её заголовку)
+        action: () => {
+          const hide = !isPanelHidden(dockMode(), k);
+          setPanelHidden(dockMode(), k, hide);
+          if (!hide) useApp.setState((s) => ({ panels: { ...s.panels, [k]: true } }));
+        },
+        checked: () => !isPanelHidden(dockMode(), k),
         enabled: () => MODE_PANELS[dockMode()].includes(k),
       })),
     ],

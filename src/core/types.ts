@@ -79,11 +79,23 @@ export interface Layer {
   text?: TextData | null;
 }
 
+/** justify — по ширине: строки текста в рамке растягиваются до краёв (кроме последней строки абзаца). */
+export type TextAlign = 'left' | 'center' | 'right' | 'justify';
+export type TextVAlign = 'top' | 'middle' | 'bottom';
+
 export interface TextData {
   value: string;
-  /** Левый верхний угол первой строки. */
+  /**
+   * Точечный текст — точка привязки первой строки (верх; слева / по центру / справа — по align).
+   * Текст в рамке — левый верхний угол рамки.
+   */
   x: number;
   y: number;
+  /** Рамка текста (как «абзацный текст» Photoshop): строки переносятся по ширине; нет — точечный текст. */
+  box?: { w: number; h: number } | null;
+  align?: TextAlign;
+  /** Выравнивание по высоте внутри рамки. */
+  valign?: TextVAlign;
   /** CSS-семейство или «bmfont:<id>» — растровый шрифт из библиотеки. */
   font: string;
   size: number;

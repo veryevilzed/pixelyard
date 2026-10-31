@@ -7,8 +7,8 @@ import { compositeForView, nextZoom, toScreen, zoomAt } from '../core/render';
 import { hardenMask, maskedCopy } from '../core/selection';
 import type { Point, RGBA, TextData } from '../core/types';
 import { app, setBg, setFg, setOpts, toast } from '../store';
-import { addTextLayer, textLayerAt, updateTextLayer } from '../core/textLayer';
-import { drawBitmapText, fontGlyphs, useFonts } from '../core/fontLibrary';
+import { addTextLayer, drawTextLayout, layoutBitmap, layoutVector, textLayerAt, updateTextLayer, type TextLayout } from '../core/textLayer';
+import { fontGlyphs, useFonts } from '../core/fontLibrary';
 import type { RenderedFont } from '../core/bmfont';
 import { changed, constrain45, editableLayer, infoLabel, requestRender, snapPoint, type Tool } from './base';
 import { sampleColor } from './sample';
@@ -457,33 +457,61 @@ export const shapeTool: Tool = {
 
 // ---------- текст ----------
 
-/** Набор текста: место, текст и слой, если правится существующий текстовый слой. */
-export const useTextEdit = create<{ at: Point | null; value: string; layerId: string | null }>(() => ({ at: null, value: '', layerId: null }));
+type TextBox = { w: number; h: number } | null;
+
+/** Набор текста: место, текст, рамка (абзацный текст) и слой, если правится существующий текстовый слой. */
+export const useTextEdit = create<{ at: Point | null; value: string; layerId: string | null; box: TextBox }>(() => ({ at: null, value: '', layerId: null, box: null }));
 
 /** id растрового шрифта, если в «Тексте» выбран BMFont (значение шрифта «bmfont:<id>»). */
 export const bitmapFontId = (font = app().opts.textFont) => (font.startsWith('bmfont:') ? font.slice(7) : null);
 
-export function textFont() {
-  const o = app().opts;
-  // для растрового шрифта поле ввода показывает системный шрифт, а сам текст — предпросмотр глифами
-  const family = bitmapFontId() ? '-apple-system, sans-serif' : o.textFont;
-  return `${o.textItalic ? 'italic ' : ''}${o.textBold ? 'bold ' : ''}${o.textSize}px ${family}`;
-}
-
-function bitmapOpts(f: RenderedFont) {
-  const o = app().opts;
-  return { scale: o.textSize / Math.max(1, f.size), letterSpacing: 0, tint: o.textBmTint ? app().fg : null, smooth: o.textAntialias };
+/** Загруженные глифы выбранного растрового шрифта (null — векторный шрифт или ещё не загружен). */
+export function activeBitmapFont(): RenderedFont | null {
+  const bm = bitmapFontId();
+  return bm ? useFonts.getState().fonts.find((x) => x.id === bm)?.font ?? null : null;
 }
 
 /** Текущие настройки инструмента → данные текстового слоя. */
-export function textDataFromOpts(value: string, at: Point): TextData {
+export function textDataFromOpts(value: string, at: Point, box: TextBox = null): TextData {
   const o = app().opts;
-  return { value, x: at.x, y: at.y, font: o.textFont, size: o.textSize, bold: o.textBold, italic: o.textItalic, antialias: o.textAntialias, color: app().fg, bmTint: o.textBmTint };
+  return {
+    value,
+    x: at.x,
+    y: at.y,
+    box,
+    align: o.textAlign,
+    valign: o.textVAlign,
+    font: o.textFont,
+    size: o.textSize,
+    bold: o.textBold,
+    italic: o.textItalic,
+    antialias: o.textAntialias,
+    color: app().fg,
+    bmTint: o.textBmTint,
+  };
+}
+
+/** Раскладка набираемого текста (по ней строится поле ввода и предпросмотр растрового шрифта). */
+export function editLayout(): TextLayout | null {
+  const { at, value, box } = useTextEdit.getState();
+  if (!at) return null;
+  const t = textDataFromOpts(value, at, box);
+  const f = activeBitmapFont();
+  return f ? layoutBitmap(t, f) : layoutVector(t);
 }
 
 /** Настройки инструмента из текстового слоя (при начале правки). */
 function optsFromText(t: TextData) {
-  setOpts({ textFont: t.font, textSize: t.size, textBold: t.bold, textItalic: t.italic, textAntialias: t.antialias, textBmTint: t.bmTint });
+  setOpts({
+    textFont: t.font,
+    textSize: t.size,
+    textBold: t.bold,
+    textItalic: t.italic,
+    textAntialias: t.antialias,
+    textBmTint: t.bmTint,
+    textAlign: t.align ?? 'left',
+    textVAlign: t.valign ?? 'top',
+  });
   setFg(t.color);
 }
 
@@ -493,7 +521,7 @@ export function editTextLayer(doc: Doc, layerId: string) {
   if (!l?.text) return;
   doc.activeLayerId = l.id;
   optsFromText(l.text);
-  useTextEdit.setState({ at: { x: l.text.x, y: l.text.y }, value: l.text.value, layerId: l.id });
+  useTextEdit.setState({ at: { x: l.text.x, y: l.text.y }, value: l.text.value, layerId: l.id, box: l.text.box ?? null });
   doc.preview = { layerId: l.id, draw: () => {} };
   const bm = bitmapFontId(l.text.font);
   if (bm) void fontGlyphs(bm).then(() => requestRender());
@@ -503,7 +531,7 @@ export function editTextLayer(doc: Doc, layerId: string) {
 /** Отмена набора: текст слоя остаётся прежним. */
 export function cancelText(doc: Doc) {
   const { layerId } = useTextEdit.getState();
-  useTextEdit.setState({ at: null, value: '', layerId: null });
+  useTextEdit.setState({ at: null, value: '', layerId: null, box: null });
   if (layerId && doc.preview?.layerId === layerId) doc.preview = null;
   changed();
 }
@@ -512,9 +540,9 @@ export function cancelText(doc: Doc) {
 let lastCommit = 0;
 
 export function commitText(doc: Doc) {
-  const { at, value, layerId } = useTextEdit.getState();
+  const { at, value, layerId, box } = useTextEdit.getState();
   if (at) lastCommit = performance.now();
-  useTextEdit.setState({ at: null, value: '', layerId: null });
+  useTextEdit.setState({ at: null, value: '', layerId: null, box: null });
   if (layerId && doc.preview?.layerId === layerId) doc.preview = null;
   if (!at) return changed();
   const done = (p: Promise<unknown>) => void p.then(changed, (e) => toast(e instanceof Error ? e.message : String(e), 'error'));
@@ -524,50 +552,137 @@ export function commitText(doc: Doc) {
       if (doc.layers.length > 1) doc.removeLayer(layerId);
       return changed();
     }
-    return done(updateTextLayer(doc, layerId, textDataFromOpts(value, at)));
+    return done(updateTextLayer(doc, layerId, textDataFromOpts(value, at, box)));
   }
   if (!value.trim()) return changed();
-  done(addTextLayer(doc, textDataFromOpts(value, at)));
+  done(addTextLayer(doc, textDataFromOpts(value, at, box)));
+}
+
+/** Поле ввода потеряло фокус: завершить набор, если фокус ушёл не в панель параметров и текст не двигают. */
+export function textBlurred(doc: Doc) {
+  setTimeout(() => {
+    if (textDrag || !useTextEdit.getState().at) return;
+    const a = document.activeElement;
+    if (a?.closest('.optionsbar, .font-picker-pop, .text-editor-wrap')) return;
+    commitText(doc);
+  }, 0);
 }
 
 /** Сменились настройки «Текста» — применить к выбранному текстовому слою (если он не правится сейчас). */
 export function applyTextOptsToLayer(doc: Doc | null) {
-  if (!doc || useTextEdit.getState().at) return requestRender();
+  if (!doc || useTextEdit.getState().at) return void (requestRender(), changed());
   const l = doc.activeLayer;
   if (!l?.text) return;
-  const next = textDataFromOpts(l.text.value, { x: l.text.x, y: l.text.y });
+  const next = textDataFromOpts(l.text.value, { x: l.text.x, y: l.text.y }, l.text.box ?? null);
   const last = doc.undoStack[doc.undoStack.length - 1];
   // серия изменений (кегль колёсиком) — одна запись истории
   if (last?.label === 'Параметры текста' && last.after?.layers === doc.layers) doc.undo();
   void updateTextLayer(doc, l.id, next, 'Параметры текста').then(changed);
 }
 
+/**
+ * Перетаскивание инструментом «Текст»:
+ * new — рамка нового абзацного текста; layer — перенос текстового слоя (⇧ или ⌘);
+ * edit — перенос набираемого текста (⇧ или ⌘ во время набора).
+ */
+let textDrag:
+  | { kind: 'new'; a: Point; b: Point }
+  | { kind: 'layer'; layerId: string; start: Point; dx: number; dy: number }
+  | { kind: 'edit'; start: Point; orig: Point }
+  | null = null;
+
 export const textTool: Tool = {
   cursor: () => 'text',
   down(p, doc) {
-    if (useTextEdit.getState().at) return commitText(doc);
+    const editing = useTextEdit.getState();
+    if (editing.at) {
+      if (p.shift || p.meta) {
+        textDrag = { kind: 'edit', start: { x: p.x, y: p.y }, orig: editing.at };
+        return;
+      }
+      return commitText(doc);
+    }
     // этот же клик только что завершил набор (поле ввода потеряло фокус) — новый текст не начинаем
     if (performance.now() - lastCommit < 400) return;
-    // клик по текстовому слою — правка его текста
     const hit = textLayerAt(doc, p.x, p.y);
+    if (hit && (p.shift || p.meta)) {
+      // ⇧/⌘ + перетаскивание по тексту — переместить слой, а не править
+      textDrag = { kind: 'layer', layerId: hit.id, start: { x: p.x, y: p.y }, dx: 0, dy: 0 };
+      doc.activeLayerId = hit.id;
+      doc.preview = { layerId: hit.id, draw: (ctx, l) => textDrag?.kind === 'layer' && ctx.drawImage(l.canvas, textDrag.dx, textDrag.dy) };
+      return changed();
+    }
+    // клик по текстовому слою — правка его текста
     if (hit) return editTextLayer(doc, hit.id);
-    useTextEdit.setState({ at: { x: Math.round(p.x), y: Math.round(p.y) }, value: '', layerId: null });
-    const bm = bitmapFontId();
-    if (bm) void fontGlyphs(bm).then(() => requestRender());
+    textDrag = { kind: 'new', a: { x: p.x, y: p.y }, b: { x: p.x, y: p.y } };
+  },
+  drag(p, doc) {
+    if (!textDrag) return;
+    if (textDrag.kind === 'new') textDrag.b = { x: p.x, y: p.y };
+    else if (textDrag.kind === 'layer') {
+      textDrag.dx = Math.round(p.x - textDrag.start.x);
+      textDrag.dy = Math.round(p.y - textDrag.start.y);
+      if (p.shift && p.meta) Math.abs(textDrag.dx) > Math.abs(textDrag.dy) ? (textDrag.dy = 0) : (textDrag.dx = 0);
+    } else {
+      const o = textDrag.orig;
+      useTextEdit.setState({ at: { x: Math.round(o.x + p.x - textDrag.start.x), y: Math.round(o.y + p.y - textDrag.start.y) } });
+    }
+    void doc;
+    requestRender();
+  },
+  up(_p, doc) {
+    const d = textDrag;
+    textDrag = null;
+    if (!d) return;
+    if (d.kind === 'new') {
+      const z = doc.view.zoom;
+      const x = Math.round(Math.min(d.a.x, d.b.x)), y = Math.round(Math.min(d.a.y, d.b.y));
+      const w = Math.round(Math.abs(d.b.x - d.a.x)), h = Math.round(Math.abs(d.b.y - d.a.y));
+      // протянули рамку — текст в рамке, просто клик — точечный текст
+      const box = w * z > 8 && h * z > 8 ? { w, h } : null;
+      useTextEdit.setState({ at: box ? { x, y } : { x: Math.round(d.a.x), y: Math.round(d.a.y) }, value: '', layerId: null, box });
+      const bm = bitmapFontId();
+      if (bm) void fontGlyphs(bm).then(() => requestRender());
+      return changed();
+    }
+    if (d.kind === 'layer') {
+      const l = doc.getLayer(d.layerId);
+      doc.preview = null;
+      if (l?.text && (d.dx || d.dy)) {
+        void updateTextLayer(doc, l.id, { ...l.text, x: l.text.x + d.dx, y: l.text.y + d.dy }, 'Переместить текст').then(changed);
+      }
+      return changed();
+    }
+    // перенос во время набора закончен — вернуть фокус полю ввода
+    useTextEdit.setState({ at: { ...useTextEdit.getState().at! } });
   },
   hover(p, doc) {
     hoverText = !useTextEdit.getState().at && !!textLayerAt(doc, p.x, p.y);
+    hoverMove = (p.shift || p.meta) && (!!useTextEdit.getState().at || hoverText);
   },
   overlay(ctx, v) {
+    if (textDrag?.kind === 'new') {
+      const a = toScreen(v, textDrag.a), b = toScreen(v, textDrag.b);
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = '#fff';
+      ctx.strokeRect(Math.round(Math.min(a.x, b.x)) + 0.5, Math.round(Math.min(a.y, b.y)) + 0.5, Math.round(Math.abs(b.x - a.x)), Math.round(Math.abs(b.y - a.y)));
+      ctx.strokeStyle = '#000';
+      ctx.lineDashOffset = 4;
+      ctx.strokeRect(Math.round(Math.min(a.x, b.x)) + 0.5, Math.round(Math.min(a.y, b.y)) + 0.5, Math.round(Math.abs(b.x - a.x)), Math.round(Math.abs(b.y - a.y)));
+      ctx.restore();
+      return;
+    }
     // предпросмотр текста растровым шрифтом во время набора
     const { at, value } = useTextEdit.getState();
-    const bm = bitmapFontId();
-    const f = bm ? useFonts.getState().fonts.find((x) => x.id === bm)?.font : null;
+    const f = activeBitmapFont();
     if (!at || !value || !f) return;
+    const L = editLayout();
+    if (!L) return;
     ctx.save();
-    ctx.translate(v.panX + at.x * v.zoom, v.panY + at.y * v.zoom);
+    ctx.translate(v.panX, v.panY);
     ctx.scale(v.zoom, v.zoom);
-    drawBitmapText(ctx, f, value, 0, 0, bitmapOpts(f));
+    drawTextLayout(ctx, textDataFromOpts(value, at, useTextEdit.getState().box), L, f);
     ctx.restore();
   },
   deactivate(doc) {
@@ -575,7 +690,8 @@ export const textTool: Tool = {
   },
 };
 let hoverText = false;
-textTool.cursor = () => (hoverText ? 'pointer' : 'text');
+let hoverMove = false;
+textTool.cursor = () => (textDrag?.kind === 'layer' || textDrag?.kind === 'edit' || hoverMove ? 'move' : hoverText ? 'pointer' : 'text');
 
 // ---------- навигация ----------
 

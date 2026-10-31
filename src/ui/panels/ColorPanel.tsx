@@ -180,13 +180,30 @@ const WHEEL = 200;
  * Метки схемы соединены фигурой (треугольник для триады и т.п.); тяните любую метку — вся схема
  * поворачивается вместе с ней.
  */
+const BASE_KEY = 'pixelyard.harmonyBase';
+const DEFAULT_BASE: HSB = [205, 0.7, 0.9];
+
+/** Начальная точка схемы: основной цвет, если он цветной; иначе — прошлая схема или яркий цвет по умолчанию. */
+function initialBase(fg: RGBA): HSB {
+  const hsb = rgbToHsb(fg);
+  if (hsb[1] >= 0.15 && hsb[2] >= 0.25) return hsb;
+  try {
+    const v = JSON.parse(localStorage.getItem(BASE_KEY) ?? 'null');
+    if (Array.isArray(v) && v.length === 3 && v.every((x) => Number.isFinite(x)) && v[2] > 0.05) return v as HSB;
+  } catch {
+    /* нет сохранённой — по умолчанию */
+  }
+  return DEFAULT_BASE;
+}
+
 function HarmonyTab() {
   const fg = useApp((s) => s.fg);
   const [scheme, setScheme] = useState<Harmony>(() => (localStorage.getItem('pixelyard.harmony') as Harmony) || 'triad');
   const [spread, setSpread] = useState(30);
-  const [base, setBase] = useState<HSB>(() => rgbToHsb(fg));
+  const [base, setBase] = useState<HSB>(() => initialBase(fg));
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => localStorage.setItem('pixelyard.harmony', scheme), [scheme]);
+  useEffect(() => localStorage.setItem(BASE_KEY, JSON.stringify(base)), [base]);
   const colors = harmonyColors(base, scheme, spread);
   const offsets = scheme === 'monochrome' ? [0] : harmonyOffsets(scheme, spread);
 
@@ -298,7 +315,7 @@ function HarmonyTab() {
         ))}
       </div>
       <div className="row-fields" style={{ flexWrap: 'wrap' }}>
-        <button className="btn small" onClick={() => setBase(rgbToHsb(fg))} title="Поставить основной цвет в центр схемы">От основного</button>
+        <button className="btn small" onClick={() => setBase(initialBase(fg))} title="Поставить основной цвет в центр схемы (серый не меняет схему)">От основного</button>
         <button className="btn small primary" onClick={() => (addToPalette(...colors), toast(`В палитру «${activePalette().name}»: ${colors.length} цв.`))}>В палитру</button>
       </div>
     </div>

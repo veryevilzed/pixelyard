@@ -1,4 +1,5 @@
-import { Circle, Minus, MoveUpRight, Square } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, Circle, Minus, MoveUpRight, Square } from 'lucide-react';
+import { FontPicker } from './FontPicker';
 import * as A from '../actions';
 import { activeDoc, openDialog, setFg, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
 import { applyTextOptsToLayer } from '../tools/fill';
@@ -64,16 +65,6 @@ function AtlasOptions({ doc }: { doc: Doc }) {
   );
 }
 
-const FONTS = [
-  { id: '-apple-system, Helvetica, Arial, sans-serif', label: 'Системный' },
-  { id: 'Helvetica Neue, Helvetica, Arial, sans-serif', label: 'Helvetica' },
-  { id: 'Georgia, serif', label: 'Georgia' },
-  { id: 'Times New Roman, serif', label: 'Times' },
-  { id: 'Menlo, Monaco, monospace', label: 'Menlo' },
-  { id: 'Courier New, monospace', label: 'Courier' },
-  { id: 'Impact, sans-serif', label: 'Impact' },
-  { id: 'Arial Black, sans-serif', label: 'Arial Black' },
-];
 
 function SelectModeSeg({ o }: { o: ToolOptions }) {
   return (
@@ -343,20 +334,7 @@ export function OptionsBar() {
     case 'text':
       body = (
         <>
-          <select value={o.textFont} onChange={(e) => setTextOpts({ textFont: e.target.value })}>
-            <optgroup label="Системные">
-              {FONTS.map((f) => (
-                <option key={f.id} value={f.id}>{f.label}</option>
-              ))}
-            </optgroup>
-            {bmFonts.length > 0 && (
-              <optgroup label="Растровые (BMFont)">
-                {bmFonts.map((f) => (
-                  <option key={f.id} value={`bmfont:${f.id}`}>{f.name}</option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+          <FontPicker value={o.textFont} onChange={(textFont) => setTextOpts({ textFont })} />
           {bmFonts.length === 0 && <button className="btn small" title="Создать растровый шрифт — он появится в этом списке" onClick={() => openDialog({ kind: 'bmfont' })}>+ BMFont</button>}
           <ColorField value={fg} onChange={(c) => (setFg(c), applyTextOptsToLayer(activeDoc()))} />
           <NumberField label="Кегль" value={o.textSize} min={4} max={1000} onChange={(v) => setTextOpts({ textSize: v })} suffix="px" />
@@ -368,8 +346,27 @@ export function OptionsBar() {
               <Check label={<i>К</i>} checked={o.textItalic} onChange={(v) => setTextOpts({ textItalic: v })} />
             </>
           )}
+          <Seg
+            value={o.textAlign}
+            onChange={(textAlign) => setTextOpts({ textAlign })}
+            options={[
+              { id: 'left', label: <AlignLeft size={13} />, title: 'По левому краю' },
+              { id: 'center', label: <AlignCenter size={13} />, title: 'По центру' },
+              { id: 'right', label: <AlignRight size={13} />, title: 'По правому краю' },
+              { id: 'justify', label: <AlignJustify size={13} />, title: 'По ширине (для текста в рамке)' },
+            ]}
+          />
+          <Seg
+            value={o.textVAlign}
+            onChange={(textVAlign) => setTextOpts({ textVAlign })}
+            options={[
+              { id: 'top', label: <AlignVerticalJustifyStart size={13} />, title: 'По верху рамки' },
+              { id: 'middle', label: <AlignVerticalJustifyCenter size={13} />, title: 'По середине рамки' },
+              { id: 'bottom', label: <AlignVerticalJustifyEnd size={13} />, title: 'По низу рамки' },
+            ]}
+          />
           <Check label="Сглаживание" checked={o.textAntialias} onChange={(v) => setTextOpts({ textAntialias: v })} />
-          <span className="note">Клик — новый текст, клик по тексту — править, ⌘Enter или клик снаружи — готово, Esc — отмена</span>
+          <span className="note">Клик — текст, протянуть — текст в рамке, клик по тексту — править, ⇧/⌘ + тянуть — переместить, ⌘Enter — готово, Esc — отмена</span>
         </>
       );
       break;
