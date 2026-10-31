@@ -1,4 +1,4 @@
-import { createCanvas, ctx2d } from './canvas';
+import { createCanvas, ctx2d, intersectRect, unionRect } from './canvas';
 import { usePatterns } from './patterns';
 import { compositeLayers, grayToMask, renderLayerContent } from './composite';
 import type { Doc, ViewState } from './doc';
@@ -58,7 +58,8 @@ export function nextZoom(z: number, dir: 1 | -1) {
 
 /** Сведённое изображение для показа — своё у каждого документа (их видно в двух областях сразу). */
 const comps = new WeakMap<Doc, HTMLCanvasElement>();
-let scratch: HTMLCanvasElement | null = null;
+/** Черновик превью — свой у каждого документа: при частичном пересведении вне области остаётся прошлый кадр. */
+const scratches = new WeakMap<Doc, HTMLCanvasElement>();
 
 /** Последнее отрисованное сведение документа (для навигатора) — без пересчёта. */
 export function lastComposite(doc: Doc): HTMLCanvasElement | null {
@@ -94,41 +95,156 @@ export function compositeForView(doc: Doc): HTMLCanvasElement {
   const prev = compKeys.get(doc);
   const cached = comps.get(doc);
   if (cached && !doc.preview && prev && (Object.keys(key) as (keyof CompKey)[]).every((k) => prev[k] === key[k])) return cached;
+  // превью с известной изменённой областью (мазок): пересводим только её
+  let clip: Rect | null = null;
+  if (doc.preview) {
+    const pv = doc.preview;
+    const was = previewKeys.get(doc);
+    const dirty = pv.takeDirty?.() ?? null;
+    const same = !!cached && !!was && was.preview === pv && was.layers === doc.layers && was.groups === doc.groups && was.editMask === doc.editingMask && cached.width === doc.width && cached.height === doc.height;
+    previewKeys.set(doc, { preview: pv, layers: doc.layers, groups: doc.groups, editMask: doc.editingMask });
+    if (same && pv.takeDirty) {
+      if (!dirty) return cached!;
+      clip = intersectRect({ x: Math.floor(dirty.x) - 1, y: Math.floor(dirty.y) - 1, w: Math.ceil(dirty.w) + 2, h: Math.ceil(dirty.h) + 2 }, { x: 0, y: 0, w: doc.width, h: doc.height });
+      if (!clip) return cached!;
+    }
+  } else previewKeys.delete(doc);
   // во время превью ключ сбрасывается — после него сведение пересчитается
   if (doc.preview) compKeys.delete(doc);
   else compKeys.set(doc, key);
   compVersions.set(doc, compositeVersion(doc) + 1);
   const comp = ensure(comps.get(doc) ?? null, doc.width, doc.height);
   comps.set(doc, comp);
-  scratch = ensure(scratch, doc.width, doc.height);
+  // черновик нужен только на время превью
+  const scratch = doc.preview ? ensure(scratches.get(doc) ?? null, doc.width, doc.height) : null;
+  if (scratch) scratches.set(doc, scratch);
+  else scratches.delete(doc);
   const ctx = ctx2d(comp);
+  ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
-  ctx.clearRect(0, 0, doc.width, doc.height);
+  const area = clip ?? { x: 0, y: 0, w: doc.width, h: doc.height };
+  if (clip) {
+    ctx.beginPath();
+    ctx.rect(clip.x, clip.y, clip.w, clip.h);
+    ctx.clip();
+  }
+  ctx.clearRect(area.x, area.y, area.w, area.h);
+  // экранная копия превью обновится только в этой области
+  if (doc.preview) {
+    previewUpdates.set(doc, clip && previewUpdates.get(doc) !== 'full' ? unionOrSet(previewUpdates.get(doc), clip) : 'full');
+    logDirty(doc, clip ?? 'full');
+  }
   const preview = doc.preview;
   const editingMask = doc.editingMask;
   compositeLayers(doc, ctx, {
     getContent: (l) => {
-      if (!preview || preview.layerId !== l.id) return null;
-      const sctx = ctx2d(scratch!);
+      if (!preview || !scratch || preview.layerId !== l.id) return null;
+      const sctx = ctx2d(scratch);
       sctx.save();
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.globalCompositeOperation = 'source-over';
       sctx.globalAlpha = 1;
-      sctx.clearRect(0, 0, doc.width, doc.height);
+      if (clip) {
+        sctx.beginPath();
+        sctx.rect(clip.x, clip.y, clip.w, clip.h);
+        sctx.clip();
+      }
+      sctx.clearRect(area.x, area.y, area.w, area.h);
       if (editingMask && l.id === doc.activeLayerId) {
         // превью правки маски: инструмент рисует в серую маску, показываем результат на слое
         preview.draw(sctx, { ...l, canvas: doc.editSource(l) });
         sctx.restore();
-        return renderLayerContent({ ...l, maskEnabled: true }, l.canvas, grayToMask(scratch!));
+        return renderLayerContent({ ...l, maskEnabled: true }, l.canvas, grayToMask(scratch));
       }
       preview.draw(sctx, l);
       sctx.restore();
-      return renderLayerContent(l, scratch!, l.mask);
+      return renderLayerContent(l, scratch, l.mask);
     },
   });
+  ctx.restore();
   return comp;
+}
+
+/**
+ * Журнал изменённых областей превью: каждая область просмотра (их может быть несколько на документ)
+ * перерисовывает подложку только в том, что изменилось с её прошлого кадра.
+ */
+const dirtyLogs = new WeakMap<Doc, { seq: number; entries: { seq: number; r: Rect | 'full' }[] }>();
+function logDirty(doc: Doc, r: Rect | 'full') {
+  let l = dirtyLogs.get(doc);
+  if (!l) dirtyLogs.set(doc, (l = { seq: 0, entries: [] }));
+  l.seq++;
+  l.entries.push({ seq: l.seq, r });
+  if (l.entries.length > 64) l.entries.shift();
+}
+const dirtySeq = (doc: Doc) => dirtyLogs.get(doc)?.seq ?? 0;
+/** Что изменилось после seq: область, «всё» или ничего. */
+function dirtySince(doc: Doc, seq: number): Rect | 'full' | null {
+  const l = dirtyLogs.get(doc);
+  if (!l || l.seq === seq) return null;
+  if (!l.entries.length || l.entries[0].seq > seq + 1) return 'full';
+  let u: Rect | null = null;
+  for (const e of l.entries) {
+    if (e.seq <= seq) continue;
+    if (e.r === 'full') return 'full';
+    u = u ? unionRect(u, e.r) : e.r;
+  }
+  return u;
+}
+
+/** Состояние, при котором сводилось последнее превью: то же — можно пересводить частично. */
+const previewKeys = new WeakMap<Doc, { preview: NonNullable<Doc['preview']>; layers: Doc['layers']; groups: Doc['groups']; editMask: boolean }>();
+/** Что обновить в экранной копии превью: область или всё. */
+const previewUpdates = new WeakMap<Doc, Rect | 'full'>();
+const unionOrSet = (a: Rect | 'full' | undefined, b: Rect): Rect => (a && a !== 'full' ? unionRect(a, b) : b);
+const previewDisplays = new WeakMap<Doc, HTMLCanvasElement[]>();
+
+/**
+ * Экранная копия сведения во время превью (в видеопамяти) с уровнями ½, ¼… — как displayFor,
+ * но в копию и уровни заливается только изменённая область (мазок на большом документе).
+ */
+function previewDisplay(doc: Doc, comp: HTMLCanvasElement, scale: number): HTMLCanvasElement {
+  let levels = previewDisplays.get(doc);
+  let upd = previewUpdates.get(doc);
+  if (!levels || levels[0].width !== comp.width || levels[0].height !== comp.height) {
+    levels = [gpuCanvas(comp.width, comp.height)];
+    previewDisplays.set(doc, levels);
+    upd = 'full';
+  }
+  previewUpdates.delete(doc);
+  const want = scale < 0.5 ? Math.floor(Math.log2(1 / scale)) : 0;
+  // новые уровни строятся целиком
+  for (let i = levels.length; i <= want; i++) {
+    const prev = levels[i - 1];
+    if (prev.width < 64 || prev.height < 64) break;
+    levels.push(gpuCanvas(Math.max(1, Math.ceil(prev.width / 2)), Math.max(1, Math.ceil(prev.height / 2))));
+    if (!upd) upd = 'full';
+  }
+  if (upd) {
+    let r = upd === 'full' ? { x: 0, y: 0, w: comp.width, h: comp.height } : upd;
+    const c0 = levels[0].getContext('2d')!;
+    // кусок — через ImageData: drawImage из «читаемого» холста копирует его целиком каждый раз
+    if (upd === 'full') {
+      c0.clearRect(0, 0, comp.width, comp.height);
+      c0.drawImage(comp, 0, 0);
+    } else c0.putImageData(ctx2d(comp).getImageData(r.x, r.y, r.w, r.h), r.x, r.y);
+    for (let i = 1; i < levels.length; i++) {
+      // область на уровне i (с запасом на сглаживание), из уровня i-1
+      const L = levels[i];
+      const x0 = Math.max(0, Math.floor(r.x / 2) - 1), y0 = Math.max(0, Math.floor(r.y / 2) - 1);
+      const x1 = Math.min(L.width, Math.ceil((r.x + r.w) / 2) + 1), y1 = Math.min(L.height, Math.ceil((r.y + r.h) / 2) + 1);
+      const c = L.getContext('2d')!;
+      // ровно ½ билинейно = усреднение 2×2; «high» перестраивал бы уровень-источник целиком
+      c.imageSmoothingQuality = 'low';
+      c.clearRect(x0, y0, x1 - x0, y1 - y0);
+      const P = levels[i - 1];
+      c.drawImage(P, x0 * 2, y0 * 2, Math.min(P.width - x0 * 2, (x1 - x0) * 2), Math.min(P.height - y0 * 2, (y1 - y0) * 2), x0, y0, (Math.min(P.width - x0 * 2, (x1 - x0) * 2)) / 2, (Math.min(P.height - y0 * 2, (y1 - y0) * 2)) / 2);
+      r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+  }
+  return levels[Math.min(want, levels.length - 1)];
 }
 
 /**
@@ -287,12 +403,19 @@ function drawRulers(ctx: CanvasRenderingContext2D, view: ViewState, W: number, H
 }
 
 /** Кэш подложки на каждый холст области просмотра. */
-const bases = new WeakMap<HTMLCanvasElement, { key: string; doc: Doc; canvas: HTMLCanvasElement }>();
+const bases = new WeakMap<HTMLCanvasElement, { key: string; viewKey: string; doc: Doc; canvas: HTMLCanvasElement; preview: Doc['preview']; seq: number }>();
 
 /** Фон, тень, шахматка, документ, попиксельная и пользовательская сетка. */
-function drawBase(ctx: CanvasRenderingContext2D, r: RenderInput, W: number, H: number, dr: Rect) {
+function drawBase(ctx: CanvasRenderingContext2D, r: RenderInput, W: number, H: number, dr: Rect, clip?: Rect) {
   const { doc, view, prefs, dpr } = r;
+  ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (clip) {
+    // только кусок экрана (мазок): остальное в кэше уже верное
+    ctx.beginPath();
+    ctx.rect(clip.x, clip.y, clip.w, clip.h);
+    ctx.clip();
+  }
   ctx.fillStyle = '#1b1b1d';
   ctx.fillRect(0, 0, W, H);
 
@@ -307,9 +430,11 @@ function drawBase(ctx: CanvasRenderingContext2D, r: RenderInput, W: number, H: n
   ctx.restore();
 
   ctx.imageSmoothingEnabled = view.zoom < 1;
-  ctx.imageSmoothingQuality = 'high';
+  // во время превью исходник меняется каждый кадр: «high» заставил бы заново строить его уменьшенные
+  // копии целиком; уровень и так подобран близко к масштабу — хватает обычного сглаживания
+  ctx.imageSmoothingQuality = doc.preview ? 'low' : 'high';
   // при сильном уменьшении — заранее уменьшенная копия: быстрее и без «муара»
-  ctx.drawImage(doc.preview ? r.composite : displayFor(doc, r.composite, view.zoom * dpr), dr.x, dr.y, dr.w, dr.h);
+  ctx.drawImage(doc.preview ? previewDisplay(doc, r.composite, view.zoom * dpr) : displayFor(doc, r.composite, view.zoom * dpr), dr.x, dr.y, dr.w, dr.h);
 
   const vis = {
     x0: Math.max(0, Math.floor(-view.panX / view.zoom)),
@@ -356,7 +481,7 @@ function drawBase(ctx: CanvasRenderingContext2D, r: RenderInput, W: number, H: n
   ctx.strokeStyle = 'rgba(0,0,0,0.6)';
   ctx.lineWidth = 1;
   ctx.strokeRect(Math.round(dr.x) - 0.5, Math.round(dr.y) - 0.5, Math.round(dr.w) + 1, Math.round(dr.h) + 1);
-
+  ctx.restore();
 }
 
 export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
@@ -365,12 +490,22 @@ export function renderView(canvas: HTMLCanvasElement, r: RenderInput) {
   const W = canvas.width / dpr, H = canvas.height / dpr;
   const dr = rectToScreen(view, { x: 0, y: 0, w: doc.width, h: doc.height });
   // подложка (фон, шахматка, документ, сетки) кэшируется: движение мыши её не перерисовывает
-  const key = [compositeVersion(doc), view.zoom, view.panX, view.panY, canvas.width, canvas.height, dpr, prefs.checker, prefs.pixelGrid, prefs.grid, prefs.gridW, prefs.gridH, prefs.gridColor].join('|');
+  const viewKey = [view.zoom, view.panX, view.panY, canvas.width, canvas.height, dpr, prefs.checker, prefs.pixelGrid, prefs.grid, prefs.gridW, prefs.gridH, prefs.gridColor].join('|');
+  const key = `${compositeVersion(doc)}|${viewKey}`;
   let base = bases.get(canvas);
-  if (doc.preview || !base || base.key !== key || base.doc !== doc) {
+  if (doc.preview && base && base.doc === doc && base.preview === doc.preview && base.viewKey === viewKey) {
+    // тот же мазок и вид: подложка перерисовывается только там, где изменилось сведение
+    const d = dirtySince(doc, base.seq);
+    if (d) {
+      const sr = d === 'full' ? undefined : rectToScreen(view, d);
+      const clip = sr && { x: Math.floor(sr.x) - 2, y: Math.floor(sr.y) - 2, w: Math.ceil(sr.w) + 4, h: Math.ceil(sr.h) + 4 };
+      drawBase(base.canvas.getContext('2d')!, r, W, H, dr, clip);
+      base.seq = dirtySeq(doc);
+    }
+  } else if (doc.preview || !base || base.key !== key || base.doc !== doc) {
     const c = base?.canvas.width === canvas.width && base.canvas.height === canvas.height ? base.canvas : gpuCanvas(canvas.width, canvas.height);
     drawBase(c.getContext('2d')!, r, W, H, dr);
-    bases.set(canvas, (base = { key: doc.preview ? '' : key, doc, canvas: c }));
+    bases.set(canvas, (base = { key: doc.preview ? '' : key, viewKey, doc, canvas: c, preview: doc.preview, seq: dirtySeq(doc) }));
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'copy';

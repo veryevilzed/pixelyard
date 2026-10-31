@@ -58,11 +58,13 @@ export function Navigator() {
       if (comp) {
         const tw = Math.max(1, Math.round(L.w * dpr)), th = Math.max(1, Math.round(L.h * dpr));
         const version = compositeVersion(d);
-        if (!thumb || thumb.doc !== d || thumb.version !== version || thumb.w !== tw || thumb.h !== th) {
+        // во время мазка (превью) миниатюра не пересчитывается — уменьшать весь документ каждый кадр дорого
+        const busy = !!d.preview && !!thumb && thumb.doc === d && thumb.w === tw && thumb.h === th;
+        if (!busy && (!thumb || thumb.doc !== d || thumb.version !== version || thumb.w !== tw || thumb.h !== th)) {
           thumb = { doc: d, version, w: tw, h: th, canvas: scaleCanvas(comp, tw, th, true) };
         }
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(thumb.canvas, L.x, L.y, L.w, L.h);
+        if (thumb) ctx.drawImage(thumb.canvas, L.x, L.y, L.w, L.h);
       }
       lastThumb = performance.now();
       // видимая область документа

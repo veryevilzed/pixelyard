@@ -46,6 +46,11 @@ export interface LayerPreview {
   layerId: string;
   /** layer.canvas здесь — то, что редактируется (пиксели или серая маска). */
   draw(ctx: CanvasRenderingContext2D, layer: Layer): void;
+  /**
+   * Область, изменённая с прошлого кадра (и сброс её). Если есть — сведение пересчитывается и
+   * обновляется на экране только в ней (мазок кисти на большом документе); null — кадр не нужен.
+   */
+  takeDirty?(): Rect | null;
 }
 
 export interface ViewState {

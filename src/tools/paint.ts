@@ -23,6 +23,15 @@ interface Stroke {
   carry: number;
   /** Пиксели карандаша (для pixel-perfect). */
   pixels: Point[] | null;
+  /**
+   * Мягкая кисть: отпечатки кладутся в серую маску «по максимуму» (lighten), а не накладываются друг
+   * на друга, — так сечение мазка равно одному отпечатку и мягкий край не «забивается» в сплошной цвет.
+   */
+  mask: HTMLCanvasElement | null;
+  /** Область маски, изменённая с последнего переноса в buffer. */
+  dirty: Rect | null;
+  /** Область, изменённая с прошлого кадра экрана (для частичного пересведения). */
+  frameDirty: Rect | null;
   /** Штамп: снимок источника и смещение (точка мазка − точка источника). */
   clone: { src: HTMLCanvasElement; dx: number; dy: number } | null;
 }
@@ -40,8 +49,19 @@ let hoverPt: Point | null = null;
 const lastEnd = new Map<string, Point>();
 
 const stampCache = new Map<string, HTMLCanvasElement>();
-function softStamp(size: number, hardness: number, color: RGBA): HTMLCanvasElement {
-  const key = `${size.toFixed(1)}|${hardness}|${color.join(',')}`;
+
+/** Плотность отпечатка на относительном радиусе t (0 — центр, 1 — край). */
+function falloff(t: number, hardness: number, aaStop: number) {
+  const h = Math.min(aaStop, hardness / 100);
+  if (t <= h) return 1;
+  const u = (t - h) / Math.max(1e-6, 1 - h);
+  // при малой жёсткости — крутой спад: плотная только середина, край сходит на нет плавно
+  return (1 - u) * (1 - u) * (1 + (hardness / 100) * 2 * u);
+}
+
+/** Серый отпечаток (белый — полная плотность), непрозрачный внутри круга — для маски «по максимуму». */
+function softStamp(size: number, hardness: number): HTMLCanvasElement {
+  const key = `${size.toFixed(1)}|${hardness}`;
   let s = stampCache.get(key);
   if (s) return s;
   const d = Math.ceil(size) + 2;
@@ -49,13 +69,14 @@ function softStamp(size: number, hardness: number, color: RGBA): HTMLCanvasEleme
   const ctx = ctx2d(s);
   const r = size / 2;
   const g = ctx.createRadialGradient(d / 2, d / 2, 0, d / 2, d / 2, r);
-  const css = rgbaToCss([color[0], color[1], color[2], 255]);
-  const transparent = rgbaToCss([color[0], color[1], color[2], 0]);
   // у жёсткой кисти оставляем ~1.2px плавного края — это и есть сглаживание контура
   const aaStop = Math.max(0, 1 - 1.2 / Math.max(r, 0.6));
-  g.addColorStop(0, css);
-  g.addColorStop(Math.min(aaStop, hardness / 100), css);
-  g.addColorStop(1, transparent);
+  const N = 24;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const v = Math.round(255 * Math.max(0, Math.min(1, falloff(t, hardness, aaStop))));
+    g.addColorStop(t, `rgb(${v},${v},${v})`);
+  }
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(d / 2, d / 2, r, 0, Math.PI * 2);
@@ -99,14 +120,43 @@ function pencilShape(n: number, round: boolean): Point[] {
 
 function grow(s: Stroke, r: Rect) {
   s.bbox = s.bbox ? unionRect(s.bbox, r) : r;
+  s.frameDirty = s.frameDirty ? unionRect(s.frameDirty, r) : r;
 }
 
 function stampSoft(s: Stroke, x: number, y: number, size: number, hardness: number) {
-  const st = softStamp(Math.max(1, size), hardness, s.color);
-  const ctx = ctx2d(s.buffer);
+  const st = softStamp(Math.max(1, size), hardness);
+  if (!s.mask) {
+    s.mask = createCanvas(s.buffer.width, s.buffer.height);
+    const m = ctx2d(s.mask);
+    m.fillStyle = '#000';
+    m.fillRect(0, 0, s.mask.width, s.mask.height);
+    m.globalCompositeOperation = 'lighten';
+  }
   const half = st.width / 2;
-  ctx.drawImage(st, x - half, y - half);
-  grow(s, { x: Math.floor(x - half), y: Math.floor(y - half), w: st.width + 1, h: st.height + 1 });
+  ctx2d(s.mask).drawImage(st, x - half, y - half);
+  const r = { x: Math.floor(x - half), y: Math.floor(y - half), w: st.width + 1, h: st.height + 1 };
+  s.dirty = s.dirty ? unionRect(s.dirty, r) : r;
+  grow(s, r);
+}
+
+/** Изменённую часть маски — в buffer: цвет мазка, прозрачность = плотность маски. */
+function flushMask(s: Stroke) {
+  if (!s.mask || !s.dirty) return;
+  const W = s.buffer.width, H = s.buffer.height;
+  const x0 = Math.max(0, s.dirty.x), y0 = Math.max(0, s.dirty.y);
+  const x1 = Math.min(W, s.dirty.x + s.dirty.w), y1 = Math.min(H, s.dirty.y + s.dirty.h);
+  s.dirty = null;
+  if (x1 <= x0 || y1 <= y0) return;
+  const m = ctx2d(s.mask).getImageData(x0, y0, x1 - x0, y1 - y0);
+  const out = new ImageData(x1 - x0, y1 - y0);
+  const [r, g, b] = s.color;
+  for (let i = 0; i < m.data.length; i += 4) {
+    out.data[i] = r;
+    out.data[i + 1] = g;
+    out.data[i + 2] = b;
+    out.data[i + 3] = m.data[i];
+  }
+  ctx2d(s.buffer).putImageData(out, x0, y0);
 }
 
 function stampPixel(s: Stroke, px: number, py: number, size: number) {
@@ -171,14 +221,19 @@ function extend(kind: Kind, s: Stroke, to: Point, pressure: number) {
       for (const p of linePixels(a, b, s.pixels.length === 0)) pushPixelPerfect(s.pixels, p);
       // перерисовка всего мазка: уже нарисованный «уголок» мог быть удалён
       const ctx = ctx2d(s.buffer);
-      if (s.bbox) ctx.clearRect(s.bbox.x, s.bbox.y, s.bbox.w, s.bbox.h);
+      if (s.bbox) {
+        ctx.clearRect(s.bbox.x, s.bbox.y, s.bbox.w, s.bbox.h);
+        s.frameDirty = s.frameDirty ? unionRect(s.frameDirty, s.bbox) : s.bbox;
+      }
       for (const p of s.pixels) stampPixel(s, p.x, p.y, 1);
     } else {
       for (const p of linePixels(a, b, s.carry === 0)) stampPixel(s, p.x, p.y, isize);
       s.carry = 1;
     }
   } else {
-    const spacing = Math.max(0.5, (size * o.brushSpacing) / 100);
+    // у мягкой кисти середина отпечатка узкая — шаг мельче, иначе мазок идёт «бусинами»
+    const soft = 0.2 + 0.8 * (st.hardness / 100);
+    const spacing = Math.max(0.5, (size * o.brushSpacing * soft) / 100);
     const dx = to.x - s.last.x, dy = to.y - s.last.y;
     const dist = Math.hypot(dx, dy);
     if (s.carry < 0) {
@@ -191,6 +246,7 @@ function extend(kind: Kind, s: Stroke, to: Point, pressure: number) {
       t += spacing;
     }
     s.carry = dist - (t - spacing);
+    flushMask(s);
   }
   s.last = to;
 }
@@ -219,6 +275,11 @@ function installPreview(s: Stroke) {
       ctx.globalAlpha = s.opacity;
       ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
       ctx.drawImage(strokeLayer(s), 0, 0);
+    },
+    takeDirty() {
+      const r = s.frameDirty;
+      s.frameDirty = null;
+      return r;
     },
   };
 }
@@ -282,6 +343,9 @@ function makePaintTool(kind: Kind): Tool {
         doc,
         layerId: layer.id,
         buffer: createCanvas(doc.width, doc.height),
+        mask: null,
+        dirty: null,
+        frameDirty: null,
         erase: kind === 'eraser',
         aliased: st.aliased,
         round: st.round,
