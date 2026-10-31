@@ -71,6 +71,7 @@ export const MENUS: Menu[] = [
     items: [
       { label: 'Новый…', shortcut: 'Mod+N', action: () => openDialog({ kind: 'new' }) },
       { label: 'Новый из буфера обмена', action: () => void A.pasteAsNewDoc() },
+      { label: 'Сканировать…', action: () => openDialog({ kind: 'scan' }) },
       { label: 'Открыть…', shortcut: 'Mod+O', action: () => void A.openDocuments() },
       { label: 'Поместить как слой…', shortcut: 'Shift+Mod+O', action: () => void A.placeFiles(), enabled: hasImg },
       'sep',

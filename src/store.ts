@@ -168,6 +168,7 @@ export type DialogState =
   | { kind: 'pdf-export' }
   | { kind: 'print' }
   | { kind: 'color'; target: 'fg' | 'bg' }
+  | { kind: 'scan' }
   | { kind: 'about' };
 
 export interface ViewPrefs {

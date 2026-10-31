@@ -1,5 +1,8 @@
 use tauri::ipc::{InvokeBody, Request, Response};
 use std::sync::Mutex;
+
+#[cfg(target_os = "macos")]
+mod scanner;
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
@@ -115,7 +118,24 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(OpenedFiles::default())
         .menu(build_menu)
-        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files, modifier_keys, print_webview])
+        .invoke_handler(tauri::generate_handler![
+            encode_webp,
+            take_opened_files,
+            modifier_keys,
+            print_webview,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_start,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_status,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_open,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_scan,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_cancel,
+            #[cfg(target_os = "macos")]
+            scanner::scanner_close
+        ])
         .build(tauri::generate_context!())
         .expect("ошибка запуска PixelYard")
         .run(|app, event| {
