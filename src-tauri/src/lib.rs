@@ -34,6 +34,12 @@ fn modifier_keys() -> Modifiers {
     Modifiers::default()
 }
 
+/// Системный диалог печати macOS для содержимого окна (страница печати готовится в интерфейсе).
+#[tauri::command]
+fn print_webview(webview: tauri::Webview) -> Result<(), String> {
+    webview.print().map_err(|e| e.to_string())
+}
+
 /// Интерфейс забирает накопленные пути при старте; дальше приходят события "open-files".
 #[tauri::command]
 fn take_opened_files(state: tauri::State<OpenedFiles>) -> Vec<String> {
@@ -109,7 +115,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(OpenedFiles::default())
         .menu(build_menu)
-        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files, modifier_keys])
+        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files, modifier_keys, print_webview])
         .build(tauri::generate_context!())
         .expect("ошибка запуска PixelYard")
         .run(|app, event| {

@@ -15,6 +15,7 @@ import { CurvesDialog } from './CurvesDialog';
 import { BMFontDialog, SpriteSheetDialog } from './PackDialogs';
 import { IconDialog } from './IconDialog';
 import { PdfExportDialog, PdfImportDialog } from './PdfDialogs';
+import { PrintDialog } from './PrintDialog';
 
 export function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: () => void; seeThrough?: boolean; width?: number }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
@@ -654,6 +655,7 @@ export function Dialogs() {
     case 'icon': return <IconDialog />;
     case 'pdf-import': return <PdfImportDialog file={d.file} />;
     case 'pdf-export': return <PdfExportDialog />;
+    case 'print': return <PrintDialog />;
     case 'curves': return activeDoc()?.activeLayer ? <CurvesDialog /> : null;
     case 'fill': return activeDoc()?.activeLayer ? <FillDialog /> : null;
   }

@@ -85,6 +85,8 @@ export const MENUS: Menu[] = [
       { label: 'Иконка приложения (ICO, ICNS, favicon…)…', action: () => openDialog({ kind: 'icon' }), enabled: hasImg },
       { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasImg },
       'sep',
+      { label: 'Печать…', shortcut: 'Mod+P', action: () => openDialog({ kind: 'print' }), enabled: hasImg },
+      'sep',
       { label: 'Закрыть', shortcut: 'Mod+W', action: () => { const d = activeDoc(); if (d) void A.closeDoc(d.id); }, enabled: hasDoc },
     ],
   },

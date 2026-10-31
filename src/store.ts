@@ -149,6 +149,7 @@ export type DialogState =
   | { kind: 'icon' }
   | { kind: 'pdf-import'; file: LoadedFile }
   | { kind: 'pdf-export' }
+  | { kind: 'print' }
   | { kind: 'about' };
 
 export interface ViewPrefs {

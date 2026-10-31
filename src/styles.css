@@ -1763,3 +1763,27 @@ code {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+/* ---------- печать ---------- */
+.print-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  height: 64vh;
+  min-height: 480px;
+}
+.print-preview {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 8px;
+  background: #2a2a2f;
+  overflow: hidden;
+}
+.print-preview canvas {
+  position: absolute;
+  inset: 0;
+  cursor: move;
+}
+.print-settings {
+  max-height: none;
+}

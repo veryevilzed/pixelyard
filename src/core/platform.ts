@@ -161,3 +161,54 @@ export async function onOpenedFiles(cb: (files: LoadedFile[]) => void): Promise<
   await drain();
   return un;
 }
+
+/**
+ * Печать готовых листов: картинки листов кладутся в скрытый блок, который виден только при печати
+ * (@media print), размер страницы — по листу. В программе — системный диалог печати macOS.
+ */
+export async function printPages(pages: HTMLCanvasElement[], paper: { w: number; h: number }) {
+  document.getElementById('print-root')?.remove();
+  document.getElementById('print-style')?.remove();
+  const root = document.createElement('div');
+  root.id = 'print-root';
+  const urls: string[] = [];
+  for (const c of pages) {
+    const blob = await canvasToBlobAsync(c);
+    const url = URL.createObjectURL(blob);
+    urls.push(url);
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.width = `${paper.w}mm`;
+    img.style.height = `${paper.h}mm`;
+    root.appendChild(img);
+    await img.decode().catch(() => {});
+  }
+  const style = document.createElement('style');
+  style.id = 'print-style';
+  style.textContent = `
+    #print-root { display: none; }
+    @page { size: ${paper.w}mm ${paper.h}mm; margin: 0; }
+    @media print {
+      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; overflow: visible !important; height: auto !important; }
+      body > *:not(#print-root) { display: none !important; }
+      #print-root { display: block !important; }
+      #print-root img { display: block; page-break-after: always; break-after: page; }
+      #print-root img:last-child { page-break-after: auto; break-after: auto; }
+    }`;
+  document.head.appendChild(style);
+  document.body.appendChild(root);
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    // диалог печати не блокирует окно — блок печати остаётся до следующей печати
+    await invoke('print_webview');
+    return;
+  }
+  window.print();
+  root.remove();
+  style.remove();
+  urls.forEach((u) => URL.revokeObjectURL(u));
+}
+
+function canvasToBlobAsync(c: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось подготовить лист'))), 'image/png'));
+}
