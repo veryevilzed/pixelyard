@@ -1,4 +1,4 @@
-import { isTauri } from './core/platform';
+import { isTauri, quitWithConfirm } from './core/platform';
 import { formatShortcut, MENUS, type MenuEntry, type MenuItem } from './menu';
 import { openDialog, useApp } from './store';
 import { useFonts } from './core/fontLibrary';
@@ -101,7 +101,8 @@ async function build() {
       await api.PredefinedMenuItem.new({ item: 'HideOthers', text: 'Скрыть остальные' }),
       await api.PredefinedMenuItem.new({ item: 'ShowAll', text: 'Показать все' }),
       await api.PredefinedMenuItem.new({ item: 'Separator' }),
-      await api.PredefinedMenuItem.new({ item: 'Quit', text: `Завершить ${APP_NAME}` }),
+      // свой пункт: перед выходом — вопрос о несохранённом
+      await api.MenuItem.new({ text: `Завершить ${APP_NAME}`, accelerator: 'CmdOrCtrl+Q', action: () => void quitWithConfirm(useApp.getState().docs.filter((d) => d.dirty).map((d) => d.name)) }),
     ],
   });
   const menus: NativeEntry[] = [];

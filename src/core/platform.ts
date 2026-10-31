@@ -212,3 +212,24 @@ export async function printPages(pages: HTMLCanvasElement[], paper: { w: number;
 function canvasToBlobAsync(c: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось подготовить лист'))), 'image/png'));
 }
+
+/**
+ * Выход из программы с вопросом о несохранённом. В Tauri — по событию «quit-requested» (⌘Q, Dock)
+ * и из меню/кнопки окна; закрывает программу командой quit_app.
+ */
+export async function quitWithConfirm(dirtyNames: string[]): Promise<void> {
+  if (!isTauri) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  if (dirtyNames.length) {
+    const { ask } = await import('@tauri-apps/plugin-dialog');
+    const list = dirtyNames.length > 6 ? `${dirtyNames.slice(0, 6).join(', ')} и ещё ${dirtyNames.length - 6}` : dirtyNames.join(', ');
+    const ok = await ask(`Несохранённые изменения: ${list}.\n\nВыйти без сохранения? Изменения пропадут.`, {
+      title: 'Выйти из PixelYard?',
+      kind: 'warning',
+      okLabel: 'Выйти без сохранения',
+      cancelLabel: 'Отмена',
+    });
+    if (!ok) return;
+  }
+  await invoke('quit_app');
+}

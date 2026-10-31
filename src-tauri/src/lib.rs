@@ -43,6 +43,12 @@ fn print_webview(webview: tauri::Webview) -> Result<(), String> {
     webview.print().map_err(|e| e.to_string())
 }
 
+/// Выход после подтверждения в интерфейсе (код 0 — без повторного вопроса).
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 /// Интерфейс забирает накопленные пути при старте; дальше приходят события "open-files".
 #[tauri::command]
 fn take_opened_files(state: tauri::State<OpenedFiles>) -> Vec<String> {
@@ -123,6 +129,7 @@ pub fn run() {
             take_opened_files,
             modifier_keys,
             print_webview,
+            quit_app,
             #[cfg(target_os = "macos")]
             scanner::scanner_start,
             #[cfg(target_os = "macos")]
@@ -139,6 +146,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("ошибка запуска PixelYard")
         .run(|app, event| {
+            // ⌘Q, «Завершить» в Dock, закрытие последнего окна: сначала спросить интерфейс
+            // о несохранённом; он ответит командой quit_app (код 0 уже не перехватывается)
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+                api.prevent_exit();
+                let _ = app.emit("quit-requested", ());
+                return;
+            }
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = event {
                 let paths: Vec<String> = urls

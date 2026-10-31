@@ -1,6 +1,6 @@
 [package]
 name = "pixelyard"
-version = "0.1.2"
+version = "0.2.0"
 description = "Редактор изображений для подготовки ресурсов"
 edition = "2021"
 license = "Apache-2.0"

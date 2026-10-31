@@ -3,7 +3,7 @@ import * as A from './actions';
 import { addSpriteFiles, installAtlasSync, newAtlasFromFiles } from './atlasActions';
 import { isAtlas } from './core/atlasDoc';
 import { installNativeMenu, runMenuItem } from './nativeMenu';
-import { confirmDialog, isTauri, onFileDrop, onOpenedFiles, setWindowTitle } from './core/platform';
+import { isTauri, onFileDrop, onOpenedFiles, quitWithConfirm, setWindowTitle } from './core/platform';
 import { adjustSize, cycleTool, eventShortcut, findShortcut } from './menu';
 import { activeDoc, app, openDialog, useApp } from './store';
 import { cycleTab } from './panes';
@@ -121,15 +121,17 @@ export function App() {
       void (async () => {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         const w = getCurrentWindow();
+        // красная кнопка окна и ⌘Q / Dock (событие quit-requested из Rust) — один и тот же вопрос
+        const quit = () => quitWithConfirm(app().docs.filter((d) => d.dirty).map((d) => d.name));
         const u = await w.onCloseRequested(async (ev) => {
-          const dirty = app().docs.filter((d) => d.dirty);
-          if (!dirty.length) return;
           ev.preventDefault();
-          const ok = await confirmDialog(`Есть несохранённые изменения (${dirty.map((d) => d.name).join(', ')}). Выйти без сохранения?`);
-          if (ok) await w.destroy();
+          await quit();
         });
-        if (cancelled) u();
-        else unlistenClose = u;
+        const { listen } = await import('@tauri-apps/api/event');
+        const u2 = await listen('quit-requested', () => void quit());
+        const both = () => (u(), u2());
+        if (cancelled) both();
+        else unlistenClose = both;
       })();
     }
     return () => {
