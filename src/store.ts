@@ -60,7 +60,10 @@ export interface ToolOptions {
   selectFixedW: number;
   selectFixedH: number;
   feather: number;
-  shapeKind: 'rect' | 'ellipse' | 'line';
+  shapeKind: 'rect' | 'ellipse' | 'line' | 'arrow';
+  arrowHeads: 'end' | 'both';
+  /** Длина наконечника в толщинах линии. */
+  arrowHeadSize: number;
   shapeFill: boolean;
   shapeStroke: boolean;
   shapeStrokeWidth: number;
@@ -118,6 +121,8 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   selectFixedH: 64,
   feather: 0,
   shapeKind: 'rect',
+  arrowHeads: 'end',
+  arrowHeadSize: 4,
   shapeFill: true,
   shapeStroke: false,
   shapeStrokeWidth: 2,

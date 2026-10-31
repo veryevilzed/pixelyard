@@ -1,4 +1,4 @@
-import { Circle, Minus, Square } from 'lucide-react';
+import { Circle, Minus, MoveUpRight, Square } from 'lucide-react';
 import * as A from '../actions';
 import { activeDoc, openDialog, setFg, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
 import { applyTextOptsToLayer } from '../tools/fill';
@@ -322,10 +322,17 @@ export function OptionsBar() {
               { id: 'rect', label: <Square size={12} />, title: 'Прямоугольник' },
               { id: 'ellipse', label: <Circle size={12} />, title: 'Эллипс' },
               { id: 'line', label: <Minus size={12} />, title: 'Линия' },
+              { id: 'arrow', label: <MoveUpRight size={12} />, title: 'Стрелка (изгибается)' },
             ]}
           />
-          {o.shapeKind !== 'line' && <Check label="Заливка" checked={o.shapeFill} onChange={(v) => setOpts({ shapeFill: v })} />}
-          {o.shapeKind !== 'line' && <Check label="Обводка" checked={o.shapeStroke} onChange={(v) => setOpts({ shapeStroke: v })} title="При заливке обводка рисуется фоновым цветом" />}
+          {o.shapeKind === 'arrow' && (
+            <>
+              <Seg value={o.arrowHeads} onChange={(v) => setOpts({ arrowHeads: v })} options={[{ id: 'end', label: '→', title: 'Наконечник в конце' }, { id: 'both', label: '↔', title: 'С обоих концов' }]} />
+              <NumberField label="Наконечник" value={o.arrowHeadSize} min={1.5} max={12} step={0.5} width={40} onChange={(v) => setOpts({ arrowHeadSize: v })} suffix="×" title="Длина наконечника в толщинах линии" />
+            </>
+          )}
+          {o.shapeKind !== 'line' && o.shapeKind !== 'arrow' && <Check label="Заливка" checked={o.shapeFill} onChange={(v) => setOpts({ shapeFill: v })} />}
+          {o.shapeKind !== 'line' && o.shapeKind !== 'arrow' && <Check label="Обводка" checked={o.shapeStroke} onChange={(v) => setOpts({ shapeStroke: v })} title="При заливке обводка рисуется фоновым цветом" />}
           <NumberField label="Толщина" value={o.shapeStrokeWidth} min={1} max={200} onChange={(v) => setOpts({ shapeStrokeWidth: v })} suffix="px" />
           {o.shapeKind === 'rect' && <NumberField label="Радиус" value={o.shapeRadius} min={0} max={500} onChange={(v) => setOpts({ shapeRadius: v })} suffix="px" />}
           <Check label="Сглаживание" checked={o.shapeAntialias} onChange={(v) => setOpts({ shapeAntialias: v })} />

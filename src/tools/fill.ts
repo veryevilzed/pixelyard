@@ -206,11 +206,203 @@ function shapeCanvas(s: NonNullable<typeof shape>): HTMLCanvasElement {
   return s.doc.selection ? maskedCopy(c, s.doc.selection) : c;
 }
 
-const SHAPE_NAMES = { rect: 'Прямоугольник', ellipse: 'Эллипс', line: 'Линия' };
+const SHAPE_NAMES = { rect: 'Прямоугольник', ellipse: 'Эллипс', line: 'Линия', arrow: 'Стрелка' };
+
+// ---------- стрелка (изгибается как кривая Безье) ----------
+
+/**
+ * Стрелка: протянуть — прямая; дальше её можно править за ручки начала, конца и изгиба
+ * (контрольная точка квадратичной кривой). Enter или клик в стороне — готово, Esc — отмена.
+ */
+interface ArrowEdit {
+  doc: Doc;
+  layerId: string;
+  a: Point;
+  b: Point;
+  c: Point;
+  /** Изгиб задан вручную (иначе контрольная точка — середина отрезка). */
+  bent: boolean;
+  drag: 'a' | 'b' | 'c' | 'new' | null;
+}
+let arrow: ArrowEdit | null = null;
+
+const qpt = (a: Point, c: Point, b: Point, t: number): Point => ({
+  x: (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * c.x + t * t * b.x,
+  y: (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * c.y + t * t * b.y,
+});
+
+/** Нарисовать стрелку: линия кривой + треугольные наконечники по касательной. */
+function drawArrow(ctx: CanvasRenderingContext2D, e: ArrowEdit) {
+  const o = app().opts;
+  const sw = o.shapeStrokeWidth;
+  const head = Math.max(8, sw * o.arrowHeadSize);
+  const color = rgbaToCss(app().fg);
+  // точки кривой — для обрезки линии под наконечники и касательных
+  const N = 64;
+  const pts = Array.from({ length: N + 1 }, (_, i) => qpt(e.a, e.c, e.b, i / N));
+  const len = pts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) : 0), 0);
+  const cut = Math.min(head * 0.75, len / 2.2);
+  const trim = (fromEnd: boolean) => {
+    let acc = 0;
+    for (let i = 1; i <= N; i++) {
+      const p = fromEnd ? pts[N - i] : pts[i], q = fromEnd ? pts[N - i + 1] : pts[i - 1];
+      acc += Math.hypot(p.x - q.x, p.y - q.y);
+      if (acc >= cut) return fromEnd ? N - i : i;
+    }
+    return fromEnd ? 0 : N;
+  };
+  const both = o.arrowHeads === 'both';
+  const i0 = both ? trim(false) : 0, i1 = trim(true);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = sw;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = i0; i <= i1; i++) (i === i0 ? ctx.moveTo(pts[i].x, pts[i].y) : ctx.lineTo(pts[i].x, pts[i].y));
+  ctx.stroke();
+  const tip = (p: Point, from: Point) => {
+    const ang = Math.atan2(p.y - from.y, p.x - from.x);
+    const w = head * 0.45;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - Math.cos(ang) * head + Math.cos(ang + Math.PI / 2) * w, p.y - Math.sin(ang) * head + Math.sin(ang + Math.PI / 2) * w);
+    ctx.lineTo(p.x - Math.cos(ang) * head * 0.82, p.y - Math.sin(ang) * head * 0.82);
+    ctx.lineTo(p.x - Math.cos(ang) * head - Math.cos(ang + Math.PI / 2) * w, p.y - Math.sin(ang) * head - Math.sin(ang + Math.PI / 2) * w);
+    ctx.closePath();
+    ctx.fill();
+  };
+  // касательная в конце кривой — направление от контрольной точки к концу
+  tip(e.b, Math.hypot(e.b.x - e.c.x, e.b.y - e.c.y) > 0.5 ? e.c : e.a);
+  if (both) tip(e.a, Math.hypot(e.a.x - e.c.x, e.a.y - e.c.y) > 0.5 ? e.c : e.b);
+}
+
+function arrowCanvas(e: ArrowEdit): HTMLCanvasElement {
+  const c = createCanvas(e.doc.width, e.doc.height);
+  drawArrow(ctx2d(c), e);
+  if (!app().opts.shapeAntialias) hardenMask(c);
+  return e.doc.selection ? maskedCopy(c, e.doc.selection) : c;
+}
+
+function arrowPreview(e: ArrowEdit) {
+  e.doc.preview = {
+    layerId: e.layerId,
+    draw(ctx, l) {
+      ctx.drawImage(l.canvas, 0, 0);
+      ctx.drawImage(arrowCanvas(e), 0, 0);
+    },
+  };
+}
+
+export function commitArrow() {
+  const e = arrow;
+  arrow = null;
+  if (!e) return;
+  e.doc.preview = null;
+  if (Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) < 2) return changed();
+  const img = arrowCanvas(e);
+  if (app().opts.shapeNewLayer) e.doc.addLayer(e.doc.makeLayer(e.doc.nextLayerName('Стрелка'), img), 'Стрелка');
+  else e.doc.pixelEdit(e.layerId, null, 'Стрелка', (ctx) => ctx.drawImage(img, 0, 0));
+  changed();
+}
+
+function cancelArrow() {
+  if (arrow) arrow.doc.preview = null;
+  arrow = null;
+  changed();
+}
+
+const arrowHandles = (e: ArrowEdit): [ 'a' | 'b' | 'c', Point][] => [['a', e.a], ['b', e.b], ['c', e.c]];
+
+const arrowTool: Tool = {
+  cursor: (p, doc) => (p && arrow && arrow.doc === doc && arrowHandles(arrow).some(([, h]) => Math.hypot((h.x - p.x) * doc.view.zoom, (h.y - p.y) * doc.view.zoom) < 9) ? 'move' : 'crosshair'),
+  down(p, doc) {
+    // ручка существующей стрелки — правка
+    if (arrow && arrow.doc === doc) {
+      const hit = arrowHandles(arrow).find(([, h]) => Math.hypot((h.x - p.x) * doc.view.zoom, (h.y - p.y) * doc.view.zoom) < 9);
+      if (hit) {
+        arrow.drag = hit[0];
+        return;
+      }
+      commitArrow();
+    }
+    const o = app().opts;
+    const layer = o.shapeNewLayer ? doc.activeLayer : editableLayer(doc);
+    if (!layer) return;
+    const a = snapPoint(p, doc.view);
+    arrow = { doc, layerId: layer.id, a, b: a, c: a, bent: false, drag: 'new' };
+    arrowPreview(arrow);
+  },
+  drag(p, doc) {
+    const e = arrow;
+    if (!e?.drag) return;
+    const sp = e.drag === 'c' ? { x: p.x, y: p.y } : snapPoint(p, doc.view);
+    if (e.drag === 'new' || e.drag === 'b') e.b = e.drag === 'new' && p.shift ? constrain45(e.a, sp) : sp;
+    if (e.drag === 'a') e.a = sp;
+    if (e.drag === 'c') {
+      e.c = sp;
+      e.bent = true;
+    }
+    // пока изгиб не задан — контрольная точка посередине (стрелка прямая)
+    if (!e.bent) e.c = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 };
+    requestRender();
+  },
+  up() {
+    if (!arrow) return;
+    if (arrow.drag === 'new' && Math.hypot(arrow.b.x - arrow.a.x, arrow.b.y - arrow.a.y) < 2) return cancelArrow();
+    arrow.drag = null;
+    requestRender();
+  },
+  key(e) {
+    if (!arrow) return false;
+    if (e.key === 'Enter') commitArrow();
+    else if (e.key === 'Escape') cancelArrow();
+    else return false;
+    return true;
+  },
+  deactivate() {
+    commitArrow();
+  },
+  overlay(ctx, v) {
+    const e = arrow;
+    if (!e) return;
+    const A = toScreen(v, e.a), B = toScreen(v, e.b), C = toScreen(v, e.c);
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = 'rgba(59,130,246,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(C.x, C.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const [id, P] of [['a', A], ['b', B]] as const) {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(P.x - 4.5, P.y - 4.5, 9, 9);
+      ctx.strokeRect(P.x - 4.5, P.y - 4.5, 9, 9);
+      void id;
+    }
+    ctx.beginPath();
+    ctx.arc(C.x, C.y, 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#3b82f6';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    ctx.restore();
+    if (!e.drag) infoLabel(ctx, 'Тяните синюю точку — изгиб; Enter — готово, Esc — отмена', B.x + 12, B.y + 12);
+  },
+};
+
+const isArrow = () => app().opts.shapeKind === 'arrow';
 
 export const shapeTool: Tool = {
-  cursor: () => 'crosshair',
+  cursor: (p, doc) => (isArrow() ? arrowTool.cursor!(p, doc) : 'crosshair'),
+  key: (e, doc) => (isArrow() || arrow ? arrowTool.key!(e, doc) : false),
   down(p, doc) {
+    if (isArrow()) return arrowTool.down!(p, doc);
+    if (arrow) commitArrow();
     const o = app().opts;
     const layer = o.shapeNewLayer ? doc.activeLayer : editableLayer(doc);
     if (!layer) return;
@@ -225,13 +417,15 @@ export const shapeTool: Tool = {
     };
   },
   drag(p, doc) {
+    if (isArrow()) return arrowTool.drag!(p, doc);
     if (!shape) return;
     shape.b = snapPoint(p, doc.view);
     shape.alt = p.alt;
     shape.shift = p.shift;
     requestRender();
   },
-  up() {
+  up(p, doc) {
+    if (isArrow()) return arrowTool.up!(p, doc);
     if (!shape) return;
     const s = shape;
     shape = null;
@@ -247,10 +441,12 @@ export const shapeTool: Tool = {
     changed();
   },
   deactivate(doc) {
+    commitArrow();
     if (doc) doc.preview = null;
     shape = null;
   },
-  overlay(ctx, v) {
+  overlay(ctx, v, doc) {
+    if (arrow) return arrowTool.overlay!(ctx, v, doc);
     if (!shape) return;
     const r = app().opts.shapeKind === 'line' ? null : shapeRect(shape);
     const b = toScreen(v, shape.b);
