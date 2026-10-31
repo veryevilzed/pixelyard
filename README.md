@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/veryevilzed/pixelyard/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/veryevilzed/pixelyard?label=скачать&color=f97316"></a>
+  <a href="https://github.com/veryevilzed/pixelyard/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/veryevilzed/pixelyard?label=%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C&amp;color=f97316"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-11%2B-black?logo=apple">
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
