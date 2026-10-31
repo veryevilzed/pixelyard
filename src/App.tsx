@@ -61,7 +61,7 @@ function EmptyState() {
         <button className="btn" onClick={() => void A.paste()}>Вставить из буфера</button>
         <button className="btn" onClick={() => void newAtlasFromFiles()}>Новый атлас из картинок…</button>
       </div>
-      <div className="hint">или перетащите файлы в окно — PNG, JPG, WebP, PSD, TIFF, TGA, GIF, BMP, проекты .pyard…</div>
+      <div className="hint">или перетащите файлы в окно — PNG, JPG, WebP, PSD, TIFF, TGA, GIF, BMP, PDF, проекты .pyard… (с ⇧ — всегда новыми вкладками)</div>
     </div>
   );
 }
@@ -94,7 +94,9 @@ export function App() {
     window.addEventListener('keydown', handleKey);
     let unlisten: (() => void) | null = null;
     let cancelled = false;
-    void onFileDrop((files) => {
+    void onFileDrop((files, mods) => {
+      // с ⇧ — всё новыми вкладками, без него — в открытый документ (слоями) или в атлас (спрайтами)
+      if (mods.shift) return void A.openLoadedFiles(files);
       // проекты открываются всегда; в атлас картинки добавляются спрайтами,
       // в открытый документ — слоями, иначе открываются новыми документами
       const projects = files.filter((f) => /\.pyard$/i.test(f.name));

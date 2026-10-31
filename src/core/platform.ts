@@ -115,18 +115,27 @@ export async function confirmDialog(message: string, title = APP_NAME): Promise<
 }
 
 /** Подписка на перетаскивание файлов в окно (Tauri отдаёт пути, браузер — File). */
-export async function onFileDrop(cb: (files: LoadedFile[]) => void): Promise<() => void> {
+export interface DropModifiers {
+  shift: boolean;
+  alt: boolean;
+}
+
+export async function onFileDrop(cb: (files: LoadedFile[], mods: DropModifiers) => void): Promise<() => void> {
   if (isTauri) {
     const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+    const { invoke } = await import('@tauri-apps/api/core');
     return getCurrentWebview().onDragDropEvent(async (e) => {
-      if (e.payload.type === 'drop') cb(await Promise.all(e.payload.paths.map(readPath)));
+      if (e.payload.type !== 'drop') return;
+      // модификаторы спрашиваем сразу — пока пользователь ещё держит клавишу
+      const mods = await invoke<DropModifiers>('modifier_keys').catch(() => ({ shift: false, alt: false }));
+      cb(await Promise.all(e.payload.paths.map(readPath)), mods);
     });
   }
   const over = (e: DragEvent) => e.preventDefault();
   const drop = async (e: DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length) cb(await Promise.all(files.map(readBrowserFile)));
+    if (files.length) cb(await Promise.all(files.map(readBrowserFile)), { shift: e.shiftKey, alt: e.altKey });
   };
   window.addEventListener('dragover', over);
   window.addEventListener('drop', drop);

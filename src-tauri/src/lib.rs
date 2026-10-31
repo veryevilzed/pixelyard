@@ -7,6 +7,33 @@ use tauri::{Emitter, Manager};
 #[derive(Default)]
 struct OpenedFiles(Mutex<Vec<String>>);
 
+/// Зажатые сейчас клавиши-модификаторы (событие сброса файлов их не сообщает).
+#[derive(serde::Serialize, Default)]
+struct Modifiers {
+    shift: bool,
+    alt: bool,
+    cmd: bool,
+    ctrl: bool,
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceFlagsState(state_id: i32) -> u64;
+}
+
+#[tauri::command]
+fn modifier_keys() -> Modifiers {
+    #[cfg(target_os = "macos")]
+    {
+        // kCGEventSourceStateCombinedSessionState = 0; маски kCGEventFlagMask*
+        let f = unsafe { CGEventSourceFlagsState(0) };
+        Modifiers { shift: f & (1 << 17) != 0, ctrl: f & (1 << 18) != 0, alt: f & (1 << 19) != 0, cmd: f & (1 << 20) != 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    Modifiers::default()
+}
+
 /// Интерфейс забирает накопленные пути при старте; дальше приходят события "open-files".
 #[tauri::command]
 fn take_opened_files(state: tauri::State<OpenedFiles>) -> Vec<String> {
@@ -82,7 +109,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(OpenedFiles::default())
         .menu(build_menu)
-        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files])
+        .invoke_handler(tauri::generate_handler![encode_webp, take_opened_files, modifier_keys])
         .build(tauri::generate_context!())
         .expect("ошибка запуска PixelYard")
         .run(|app, event| {
