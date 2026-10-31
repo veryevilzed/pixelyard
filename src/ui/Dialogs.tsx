@@ -16,6 +16,7 @@ import { BMFontDialog, SpriteSheetDialog } from './PackDialogs';
 import { IconDialog } from './IconDialog';
 import { PdfExportDialog, PdfImportDialog } from './PdfDialogs';
 import { PrintDialog } from './PrintDialog';
+import { ColorDialog } from './ColorDialog';
 
 export function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: () => void; seeThrough?: boolean; width?: number }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
@@ -632,7 +633,7 @@ export function Dialogs() {
   const d = useApp((s) => s.dialog);
   useApp((s) => s.tick);
   if (!d) return null;
-  const needsDoc = !['new', 'shortcuts', 'about', 'grid-settings', 'spritesheet', 'bmfont', 'pdf-import'].includes(d.kind);
+  const needsDoc = !['new', 'shortcuts', 'about', 'grid-settings', 'spritesheet', 'bmfont', 'pdf-import', 'color'].includes(d.kind);
   if (needsDoc && !activeDoc()) return null;
   switch (d.kind) {
     case 'new': return <NewDialog />;
@@ -656,6 +657,7 @@ export function Dialogs() {
     case 'pdf-import': return <PdfImportDialog file={d.file} />;
     case 'pdf-export': return <PdfExportDialog />;
     case 'print': return <PrintDialog />;
+    case 'color': return <ColorDialog key={d.target} target={d.target} />;
     case 'curves': return activeDoc()?.activeLayer ? <CurvesDialog /> : null;
     case 'fill': return activeDoc()?.activeLayer ? <FillDialog /> : null;
   }

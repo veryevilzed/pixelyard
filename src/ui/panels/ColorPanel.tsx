@@ -2,31 +2,58 @@ import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { rgbaToCss } from '../../core/canvas';
 import type { RGBA } from '../../core/types';
-import { setBg, setFg, useApp } from '../../store';
+import { openDialog, setBg, setFg, toast, useApp } from '../../store';
 import { HexInput, NumberField, Seg } from '../controls';
+import { decodeGpl, encodeGpl, HARMONIES, harmonyColors, harmonyOffsets, hex, hsbToRgb, rgbToHsb, type Harmony, type HSB, type Palette } from '../../core/color';
+import { uid } from '../../core/canvas';
+import { openFiles, saveFileAs } from '../../core/platform';
 
-const useColorTarget = create<{ target: 'fg' | 'bg' }>(() => ({ target: 'fg' }));
+const useColorTarget = create<{ target: 'fg' | 'bg'; tab: 'color' | 'harmony' | 'palettes' }>(() => ({ target: 'fg', tab: 'color' }));
 
+/** Клик по образцу цвета в панели инструментов — диалог «Палитра цветов». */
 export function openColorPicker(target: 'fg' | 'bg') {
   useColorTarget.setState({ target });
-  useApp.setState((s) => ({ panels: { ...s.panels, color: true } }));
+  openDialog({ kind: 'color', target });
 }
 
-function rgbToHsv([r, g, b]: RGBA): [number, number, number] {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-  let h = 0;
-  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  return [((h * 60) + 360) % 360, max ? d / max : 0, max];
+// ---------- свои палитры ----------
+
+const PAL_KEY = 'pixelyard.palettes';
+export const usePalettes = create<{ palettes: Palette[]; activeId: string | null }>(() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PAL_KEY) ?? 'null') as { palettes: Palette[]; activeId: string | null } | null;
+    if (v?.palettes) return v;
+  } catch {
+    /* повреждённые данные — с нуля */
+  }
+  return { palettes: [], activeId: null };
+});
+usePalettes.subscribe((s) => localStorage.setItem(PAL_KEY, JSON.stringify(s)));
+
+function activePalette(): Palette {
+  const st = usePalettes.getState();
+  const p = st.palettes.find((x) => x.id === st.activeId) ?? st.palettes[0];
+  if (p) return p;
+  const created: Palette = { id: uid('pal'), name: 'Моя палитра', colors: [] };
+  usePalettes.setState({ palettes: [created], activeId: created.id });
+  return created;
 }
 
-function hsvToRgb(h: number, s: number, v: number, a: number): RGBA {
-  const f = (n: number) => {
-    const k = (n + h / 60) % 6;
-    return Math.round((v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255);
-  };
-  return [f(5), f(3), f(1), a];
+function updatePalette(id: string, fn: (p: Palette) => Palette) {
+  usePalettes.setState((s) => ({ palettes: s.palettes.map((p) => (p.id === id ? fn(p) : p)) }));
 }
+
+const same = (a: RGBA, b: RGBA) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+
+/** Добавить цвета в текущую палитру (повторы пропускаются). */
+export function addToPalette(...colors: RGBA[]) {
+  const p = activePalette();
+  updatePalette(p.id, (x) => ({ ...x, colors: [...x.colors, ...colors.map((c): RGBA => [c[0], c[1], c[2], 255]).filter((c, i, arr) => !x.colors.some((y) => same(y, c)) && arr.findIndex((z) => same(z, c)) === i)] }));
+  usePalettes.setState({ activeId: p.id });
+}
+
+const rgbToHsv = (c: RGBA) => rgbToHsb(c);
+const hsvToRgb = (h: number, s: number, v: number, a: number) => hsbToRgb(h, s, v, a);
 
 // Базовая палитра: оттенки серого + насыщенные и пастельные тона
 const PALETTE: string[] = [
@@ -36,6 +63,20 @@ const PALETTE: string[] = [
 ];
 
 export function ColorPanel() {
+  const tab = useColorTarget((s) => s.tab);
+  return (
+    <>
+      <div className="panel-body" style={{ paddingBottom: 0 }}>
+        <Seg value={tab} onChange={(t) => useColorTarget.setState({ tab: t })} options={[{ id: 'color', label: 'Цвет' }, { id: 'harmony', label: 'Гармония' }, { id: 'palettes', label: 'Палитры' }]} />
+      </div>
+      {tab === 'color' && <ColorTab />}
+      {tab === 'harmony' && <HarmonyTab />}
+      {tab === 'palettes' && <PalettesTab />}
+    </>
+  );
+}
+
+function ColorTab() {
   const target = useColorTarget((s) => s.target);
   const fg = useApp((s) => s.fg);
   const bg = useApp((s) => s.bg);
@@ -129,3 +170,235 @@ export function ColorPanel() {
     </div>
   );
 }
+
+// ---------- круг гармоний ----------
+
+const WHEEL = 200;
+
+/**
+ * Цветовой круг: тон — угол, насыщенность — расстояние от центра, яркость — ползунком.
+ * Метки схемы соединены фигурой (треугольник для триады и т.п.); тяните любую метку — вся схема
+ * поворачивается вместе с ней.
+ */
+function HarmonyTab() {
+  const fg = useApp((s) => s.fg);
+  const [scheme, setScheme] = useState<Harmony>(() => (localStorage.getItem('pixelyard.harmony') as Harmony) || 'triad');
+  const [spread, setSpread] = useState(30);
+  const [base, setBase] = useState<HSB>(() => rgbToHsb(fg));
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => localStorage.setItem('pixelyard.harmony', scheme), [scheme]);
+  const colors = harmonyColors(base, scheme, spread);
+  const offsets = scheme === 'monochrome' ? [0] : harmonyOffsets(scheme, spread);
+
+  useEffect(() => {
+    const c = ref.current!;
+    const dpr = window.devicePixelRatio || 1;
+    // целое число пикселей: при дробном dpr индексы в ImageData иначе «уплывают»
+    const S = Math.round(WHEEL * dpr);
+    c.width = c.height = S;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(S, S);
+    const R = S / 2;
+    for (let y = 0; y < S; y++)
+      for (let x = 0; x < S; x++) {
+        const dx = x - R + 0.5, dy = y - R + 0.5, d = Math.hypot(dx, dy) / R;
+        if (d > 1) continue;
+        const h = ((Math.atan2(dy, dx) * 180) / Math.PI + 360 + 90) % 360;
+        const col = hsbToRgb(h, d, base[2]);
+        const i = (y * S + x) * 4;
+        img.data[i] = col[0];
+        img.data[i + 1] = col[1];
+        img.data[i + 2] = col[2];
+        // мягкий край круга
+        img.data[i + 3] = d > 0.985 ? Math.round(255 * (1 - d) / 0.015) : 255;
+      }
+    ctx.putImageData(img, 0, 0);
+    // метки схемы и фигура между ними
+    const pt = (h: number, s: number) => {
+      const a = ((h - 90) * Math.PI) / 180;
+      return [R + Math.cos(a) * s * R, R + Math.sin(a) * s * R];
+    };
+    const pts = scheme === 'monochrome' ? [pt(base[0], base[1])] : offsets.map((o) => pt((base[0] + o + 360) % 360, base[1]));
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    if (pts.length > 2) ctx.closePath();
+    ctx.stroke();
+    pts.forEach(([x, y], i) => {
+      ctx.beginPath();
+      ctx.arc(x, y, (i === 0 ? 8 : 6) * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = rgbaToCss(colors[i] ?? colors[0]);
+      ctx.fill();
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+      ctx.lineWidth = 1 * dpr;
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.stroke();
+    });
+  }, [base, scheme, spread]);
+
+  const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const toHs = (ev: { clientX: number; clientY: number }) => {
+      const r = el.getBoundingClientRect();
+      const dx = ev.clientX - r.left - r.width / 2, dy = ev.clientY - r.top - r.height / 2;
+      return { h: ((Math.atan2(dy, dx) * 180) / Math.PI + 450) % 360, s: Math.min(1, Math.hypot(dx, dy) / (r.width / 2)) };
+    };
+    // за какую метку взялись — схема поворачивается так, чтобы она шла за мышью
+    const p0 = toHs(e);
+    let grab = 0, best = Infinity;
+    offsets.forEach((o) => {
+      const d = Math.abs((((base[0] + o - p0.h) % 360) + 540) % 360 - 180);
+      if (d < best) {
+        best = d;
+        grab = o;
+      }
+    });
+    const go = (ev: { clientX: number; clientY: number }) => {
+      const p = toHs(ev);
+      setBase((b) => [(p.h - grab + 360) % 360, p.s, b[2]]);
+    };
+    go(e);
+    const move = (ev: PointerEvent) => go(ev);
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className="panel-body harmony">
+      <select value={scheme} onChange={(e) => setScheme(e.target.value as Harmony)}>
+        {HARMONIES.map((h) => (
+          <option key={h.id} value={h.id}>{h.label}</option>
+        ))}
+      </select>
+      <div className="harmony-wheel">
+        <canvas ref={ref} style={{ width: WHEEL, height: WHEEL }} onPointerDown={onDown} />
+      </div>
+      <div className="row-fields">
+        <span className="label static">Яркость</span>
+        <input type="range" min={0} max={100} value={Math.round(base[2] * 100)} onChange={(e) => setBase([base[0], base[1], Number(e.target.value) / 100])} style={{ flex: 1 }} />
+      </div>
+      {(scheme === 'analogous' || scheme === 'split' || scheme === 'tetrad') && (
+        <div className="row-fields">
+          <span className="label static">Раствор</span>
+          <input type="range" min={10} max={90} value={spread} onChange={(e) => setSpread(Number(e.target.value))} style={{ flex: 1 }} />
+          <span className="dim">{spread}°</span>
+        </div>
+      )}
+      <div className="harmony-swatches">
+        {colors.map((c, i) => (
+          <div key={i} style={{ background: rgbaToCss(c) }} title={`${hex(c)} — клик: основной цвет, ⌥клик: фоновый`} onClick={(e) => (e.altKey ? setBg(c) : setFg(c))} />
+        ))}
+      </div>
+      <div className="row-fields" style={{ flexWrap: 'wrap' }}>
+        <button className="btn small" onClick={() => setBase(rgbToHsb(fg))} title="Поставить основной цвет в центр схемы">От основного</button>
+        <button className="btn small primary" onClick={() => (addToPalette(...colors), toast(`В палитру «${activePalette().name}»: ${colors.length} цв.`))}>В палитру</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- палитры ----------
+
+function PalettesTab() {
+  const { palettes, activeId } = usePalettes();
+  const fg = useApp((s) => s.fg);
+  const [renaming, setRenaming] = useState(false);
+  const p = palettes.find((x) => x.id === activeId) ?? palettes[0];
+  const create = () => {
+    const np: Palette = { id: uid('pal'), name: `Палитра ${palettes.length + 1}`, colors: [] };
+    usePalettes.setState({ palettes: [...palettes, np], activeId: np.id });
+  };
+  const exportGpl = async () => {
+    if (!p) return;
+    await saveFileAs(`${p.name}.gpl`, new TextEncoder().encode(encodeGpl(p)), [{ name: 'Палитра GIMP', extensions: ['gpl'] }]);
+  };
+  const importGpl = async () => {
+    const files = await openFiles([{ name: 'Палитра GIMP', extensions: ['gpl'] }]);
+    for (const f of files) {
+      try {
+        const { name, colors } = decodeGpl(new TextDecoder().decode(f.data), f.name.replace(/\.gpl$/i, ''));
+        const np: Palette = { id: uid('pal'), name, colors };
+        usePalettes.setState((s) => ({ palettes: [...s.palettes, np], activeId: np.id }));
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e), 'error');
+      }
+    }
+  };
+  return (
+    <div className="panel-body">
+      <div className="row-fields">
+        {renaming && p ? (
+          <input
+            type="text"
+            autoFocus
+            defaultValue={p.name}
+            style={{ flex: 1 }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' || e.key === 'Escape') (e.target as HTMLInputElement).blur();
+            }}
+            onBlur={(e) => {
+              setRenaming(false);
+              const v = e.target.value.trim();
+              if (v) updatePalette(p.id, (x) => ({ ...x, name: v }));
+            }}
+          />
+        ) : (
+          <select value={p?.id ?? ''} onChange={(e) => usePalettes.setState({ activeId: e.target.value })} style={{ flex: 1, minWidth: 0 }} onDoubleClick={() => setRenaming(true)}>
+            {!palettes.length && <option value="">Палитр пока нет</option>}
+            {palettes.map((x) => (
+              <option key={x.id} value={x.id}>{x.name} ({x.colors.length})</option>
+            ))}
+          </select>
+        )}
+        <button className="btn small" onClick={create} title="Новая палитра">＋</button>
+      </div>
+      {p && (
+        <>
+          <div className="palette user-palette">
+            {p.colors.map((c, i) => (
+              <div
+                key={i}
+                style={{ background: rgbaToCss(c) }}
+                title={`${hex(c)} — клик: основной, ⌥клик: фоновый, ⇧клик: убрать`}
+                onClick={(e) => {
+                  if (e.shiftKey) updatePalette(p.id, (x) => ({ ...x, colors: x.colors.filter((_, j) => j !== i) }));
+                  else if (e.altKey) setBg(c);
+                  else setFg(c);
+                }}
+              />
+            ))}
+            <div className="add" title="Добавить основной цвет" onClick={() => addToPalette(fg)}>＋</div>
+          </div>
+          <div className="row-fields" style={{ flexWrap: 'wrap' }}>
+            <button className="btn small" onClick={() => setRenaming(true)}>Переименовать</button>
+            <button className="btn small" onClick={() => void exportGpl()} disabled={!p.colors.length}>Экспорт .gpl</button>
+            <button className="btn small" onClick={() => void importGpl()}>Импорт .gpl</button>
+            <button
+              className="btn small"
+              onClick={() => usePalettes.setState((s) => ({ palettes: s.palettes.filter((x) => x.id !== p.id), activeId: s.palettes.find((x) => x.id !== p.id)?.id ?? null }))}
+            >
+              Удалить
+            </button>
+          </div>
+          <div className="note">Цвета добавляются кнопкой ＋, из «Гармонии» и из диалога цвета. ⇧клик — убрать цвет.</div>
+        </>
+      )}
+      {!p && (
+        <div className="row-fields">
+          <button className="btn small" onClick={create}>Создать палитру</button>
+          <button className="btn small" onClick={() => void importGpl()}>Импорт .gpl</button>
+        </div>
+      )}
+    </div>
+  );
+}
+

@@ -150,6 +150,7 @@ export type DialogState =
   | { kind: 'pdf-import'; file: LoadedFile }
   | { kind: 'pdf-export' }
   | { kind: 'print' }
+  | { kind: 'color'; target: 'fg' | 'bg' }
   | { kind: 'about' };
 
 export interface ViewPrefs {
