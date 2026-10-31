@@ -9,6 +9,7 @@ import { saveFileAs, type LoadedFile } from '../core/platform';
 import { activeDoc, closeDialog, toast, useApp } from '../store';
 import { Check, NumberField, Seg } from './controls';
 import { Modal } from './Dialogs';
+import { formatSize } from './SaveDialogs';
 
 const DPIS = [72, 96, 150, 300];
 
@@ -153,13 +154,13 @@ export function PdfImportDialog({ file }: { file: LoadedFile }) {
 type ExportMode = 'merged' | 'layers' | 'slices';
 
 export function PdfExportDialog() {
-  const doc = activeDoc();
+  // диалог открывается только при открытом документе (см. Dialogs)
+  const doc = activeDoc()!;
   const saved = JSON.parse(localStorage.getItem('pixelyard.pdfExport') ?? '{}') as { mode?: ExportMode; dpi?: number; white?: boolean; order?: 'top' | 'bottom' };
-  const [mode, setMode] = useState<ExportMode>(saved.mode === 'slices' && !doc?.slices.length ? 'merged' : saved.mode ?? 'merged');
+  const [mode, setMode] = useState<ExportMode>(saved.mode === 'slices' && !doc.slices.length ? 'merged' : saved.mode ?? 'merged');
   const [dpi, setDpi] = useState(saved.dpi ?? 72);
   const [white, setWhite] = useState(saved.white ?? false);
   const [order, setOrder] = useState<'top' | 'bottom'>(saved.order ?? 'top');
-  if (!doc) return null;
   const visible = doc.layers.filter((l) => l.visible);
   const pageCount = mode === 'merged' ? 1 : mode === 'layers' ? visible.length : doc.slices.length;
 
@@ -173,8 +174,8 @@ export function PdfExportDialog() {
     return out;
   };
 
-  const run = async () => {
-    localStorage.setItem('pixelyard.pdfExport', JSON.stringify({ mode, dpi, white, order }));
+  /** Страницы PDF по текущим настройкам. */
+  const buildPages = (): HTMLCanvasElement[] => {
     let pages: HTMLCanvasElement[];
     if (mode === 'merged') pages = [doc.composite()];
     else if (mode === 'slices') {
@@ -191,11 +192,37 @@ export function PdfExportDialog() {
         return c;
       });
     }
+    return pages.map(withBg);
+  };
+
+  // размер PDF — вживую, с задержкой
+  const [size, setSize] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setSize(null);
+    const t = setTimeout(() => {
+      try {
+        const pages = buildPages();
+        if (alive) setSize(pages.length ? encodePdf(pages, dpi, '').length : 0);
+      } catch {
+        if (alive) setSize(-1);
+      }
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, dpi, white, order, doc]);
+
+  const run = async () => {
+    localStorage.setItem('pixelyard.pdfExport', JSON.stringify({ mode, dpi, white, order }));
+    const pages = buildPages();
     if (!pages.length) return toast('Нет страниц для PDF', 'error');
     closeDialog();
     useApp.setState({ busy: 'Сборка PDF…' });
     try {
-      const data = encodePdf(pages.map(withBg), dpi, fileStem(doc.name));
+      const data = encodePdf(pages, dpi, fileStem(doc.name));
       const path = await saveFileAs(`${fileStem(doc.name)}.pdf`, data, [{ name: 'PDF', extensions: ['pdf'] }]);
       if (path) toast(`PDF сохранён: ${pages.length} стр.`);
     } catch (e) {
@@ -248,7 +275,9 @@ export function PdfExportDialog() {
         <span className="lbl">Фон</span>
         <Check label="Белая подложка (иначе прозрачность сохраняется)" checked={white} onChange={setWhite} />
         <span className="lbl" />
-        <span className="note">Страниц: {pageCount}. Картинки без потерь (Flate), прозрачность — маской.</span>
+        <span className="note">
+          Страниц: {pageCount} · размер файла: {size === null ? 'считаю…' : size < 0 ? '—' : formatSize(size)}. Картинки без потерь (Flate), прозрачность — маской.
+        </span>
       </div>
     </Modal>
   );

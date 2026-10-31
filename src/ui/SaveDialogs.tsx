@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SAVE_FORMATS, saveDocAs, type SaveFormat } from '../actions';
+import { encodeDoc, SAVE_FORMATS, saveDocAs, type SaveFormat } from '../actions';
 import { createCanvas, cropCanvas, ctx2d, rgbaToCss, scaleCanvas } from '../core/canvas';
 import { encodeCanvas, fileStem } from '../core/io';
 import { saveFileAs } from '../core/platform';
@@ -7,6 +7,9 @@ import { maskedCopy } from '../core/selection';
 import { activeDoc, closeDialog, toast, useApp } from '../store';
 import { Check, NumberField, Seg } from './controls';
 import { Modal } from './Dialogs';
+
+/** 512 Б, 34,3 КБ, 1,25 МБ */
+export const formatSize = (n: number) => (n < 1024 ? `${n} Б` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} КБ` : `${(n / 1024 / 1024).toFixed(2)} МБ`);
 
 // ---------- «Сохранить как» с выбором формата ----------
 
@@ -22,6 +25,19 @@ export function SaveAsDialog() {
   const [quality, setQuality] = useState(saved.quality ?? 92);
   const f = SAVE_FORMATS.find((x) => x.id === fmt)!;
   const layered = doc.layers.length > 1 || doc.groups.length > 0 || doc.layers.some((l) => l.text || l.mask);
+  // размер файла — считается вживую (с задержкой, чтобы ползунок качества не тормозил)
+  const [size, setSize] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setSize(null);
+    const t = setTimeout(() => {
+      encodeDoc(doc, fmt, quality).then((d) => alive && setSize(d.length), () => alive && setSize(-1));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [doc, fmt, quality]);
   const ok = () => {
     localStorage.setItem(SAVE_KEY, JSON.stringify({ fmt, quality }));
     closeDialog();
@@ -34,6 +50,9 @@ export function SaveAsDialog() {
       width={520}
       footer={
         <>
+          <span className="left note">
+            {doc.width} × {doc.height} px · размер файла: {size === null ? 'считаю…' : size < 0 ? '—' : formatSize(size)}
+          </span>
           <button className="btn" onClick={closeDialog}>Отмена</button>
           <button className="btn primary" onClick={ok}>Сохранить…</button>
         </>
@@ -76,7 +95,6 @@ interface ExpSettings {
   smooth: boolean;
 }
 
-const formatSize = (n: number) => (n < 1024 ? `${n} Б` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} КБ` : `${(n / 1024 / 1024).toFixed(2)} МБ`);
 
 /**
  * Экспорт сведённого изображения (или выделения) в PNG/JPEG/WebP с масштабом, качеством,

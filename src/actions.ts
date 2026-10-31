@@ -154,7 +154,8 @@ const formatOfPath = (name: string): SaveFormat => {
 /** Качество, с которым документ сохранялся в последний раз (для ⌘S в JPEG/WebP). */
 const saveQuality = new WeakMap<Doc, number>();
 
-async function encodeDoc(doc: Doc, fmt: SaveFormat, quality: number): Promise<Uint8Array> {
+/** Байты файла документа в формате (для сохранения и оценки размера в диалоге). */
+export async function encodeDoc(doc: Doc, fmt: SaveFormat, quality: number): Promise<Uint8Array> {
   // иконки — стандартный набор размеров; тонкая настройка — «Файл → Иконка приложения»
   if (fmt === 'ico' || fmt === 'icns') {
     const files = await buildIconFiles(doc.composite(), { ...DEFAULT_ICON, platforms: [fmt === 'ico' ? 'windows' : 'macos'], name: 'x' });
