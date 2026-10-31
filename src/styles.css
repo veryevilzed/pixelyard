@@ -1942,3 +1942,57 @@ code {
 .scan-settings {
   max-height: none;
 }
+/* ---------- сохранить как / экспортировать как ---------- */
+.save-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.save-format {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  cursor: default;
+}
+.save-format.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.save-format > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.save-format .ext {
+  color: var(--text-faint);
+  font: 11px ui-monospace, Menlo, monospace;
+}
+.export-as {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  height: 60vh;
+  min-height: 440px;
+}
+.export-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background-image: conic-gradient(#3a3a40 25%, #2e2e33 0 50%, #3a3a40 0 75%, #2e2e33 0);
+  background-size: 16px 16px;
+  overflow: hidden;
+}
+.export-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}

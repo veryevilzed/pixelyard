@@ -84,6 +84,7 @@ export const MENUS: Menu[] = [
       { label: 'Экспорт слайсов…', action: () => openDialog({ kind: 'export', source: 'slices' }), enabled: hasSlices },
       { label: 'Спрайтшит (упаковка в атлас)…', shortcut: 'Alt+Mod+P', action: () => openDialog({ kind: 'spritesheet' }) },
       { label: 'Иконка приложения (ICO, ICNS, favicon…)…', action: () => openDialog({ kind: 'icon' }), enabled: hasImg },
+      { label: 'Экспортировать как… (PNG, JPEG, WebP)', shortcut: 'Alt+Shift+Mod+W', action: () => openDialog({ kind: 'export-as' }), enabled: hasImg },
       { label: 'Быстрый экспорт в PNG', shortcut: 'Alt+Shift+Mod+E', action: () => void A.quickExportPng(), enabled: hasImg },
       'sep',
       { label: 'Печать…', shortcut: 'Mod+P', action: () => openDialog({ kind: 'print' }), enabled: hasImg },

@@ -1,7 +1,7 @@
 import { alphaBounds, canvasToBlob, cloneCanvas, createCanvas, cropCanvas, ctx2d, intersectRect, rgbaToCss, scaleCanvas, uid } from './core/canvas';
 import { Doc } from './core/doc';
 import { FILTERS, type Params } from './core/filters';
-import { decodeFile, decodeToCanvas, encodeCanvas, encodePsd, fileStem, formatFromName, OPEN_FILTERS } from './core/io';
+import { decodeFile, decodeToCanvas, encodeCanvas, encodePsd, fileStem, OPEN_FILTERS } from './core/io';
 import { baseName, confirmDialog, isTauri, openFiles, readPath, saveFileAs, writePath, type LoadedFile } from './core/platform';
 import { importFnt, parseFnt, saveFont } from './core/fontLibrary';
 import { nextZoom, RULER, zoomAt } from './core/render';
@@ -134,58 +134,71 @@ export function addImageAsLayer(doc: Doc, img: HTMLCanvasElement, name: string, 
   changed();
 }
 
-const SAVE_FILTERS = [
-  { name: 'Photoshop (слои)', extensions: ['psd'] },
-  { name: 'PNG', extensions: ['png'] },
-  { name: 'JPEG', extensions: ['jpg', 'jpeg'] },
-  { name: 'WebP', extensions: ['webp'] },
-  { name: 'TIFF', extensions: ['tif', 'tiff'] },
-  { name: 'Иконка Windows (ICO)', extensions: ['ico'] },
-  { name: 'Иконка macOS (ICNS)', extensions: ['icns'] },
+/** Форматы сохранения документа: расширение, подпись, хранит ли слои, есть ли качество. */
+export type SaveFormat = 'psd' | 'png' | 'jpg' | 'webp' | 'tiff' | 'ico' | 'icns';
+export const SAVE_FORMATS: { id: SaveFormat; label: string; ext: string; hint: string; quality?: boolean }[] = [
+  { id: 'psd', label: 'Photoshop (PSD)', ext: 'psd', hint: 'Слои, маски, стили, папки, текст — всё сохраняется' },
+  { id: 'png', label: 'PNG', ext: 'png', hint: 'Без потерь, с прозрачностью; слои сводятся' },
+  { id: 'jpg', label: 'JPEG', ext: 'jpg', hint: 'С потерями, без прозрачности (подложка белая); слои сводятся', quality: true },
+  { id: 'webp', label: 'WebP', ext: 'webp', hint: 'Компактный, с прозрачностью; качество 100 — без потерь', quality: true },
+  { id: 'tiff', label: 'TIFF', ext: 'tif', hint: 'Без потерь, для печати и обмена; слои сводятся' },
+  { id: 'ico', label: 'Иконка Windows (ICO)', ext: 'ico', hint: 'Стандартные размеры 16–256; тонкая настройка — «Иконка приложения»' },
+  { id: 'icns', label: 'Иконка macOS (ICNS)', ext: 'icns', hint: '16–1024 px; тонкая настройка — «Иконка приложения»' },
 ];
 
-async function encodeForPath(doc: Doc, name: string): Promise<Uint8Array> {
+const formatOfPath = (name: string): SaveFormat => {
+  const e = name.toLowerCase().split('.').pop() ?? '';
+  return (e === 'jpeg' ? 'jpg' : e === 'tiff' ? 'tiff' : e === 'tif' ? 'tiff' : SAVE_FORMATS.some((f) => f.id === e) ? e : 'psd') as SaveFormat;
+};
+
+/** Качество, с которым документ сохранялся в последний раз (для ⌘S в JPEG/WebP). */
+const saveQuality = new WeakMap<Doc, number>();
+
+async function encodeDoc(doc: Doc, fmt: SaveFormat, quality: number): Promise<Uint8Array> {
   // иконки — стандартный набор размеров; тонкая настройка — «Файл → Иконка приложения»
-  if (/\.(ico|icns)$/i.test(name)) {
-    const files = await buildIconFiles(doc.composite(), { ...DEFAULT_ICON, platforms: [/\.ico$/i.test(name) ? 'windows' : 'macos'], name: 'x' });
+  if (fmt === 'ico' || fmt === 'icns') {
+    const files = await buildIconFiles(doc.composite(), { ...DEFAULT_ICON, platforms: [fmt === 'ico' ? 'windows' : 'macos'], name: 'x' });
     return Object.values(files)[0];
   }
-  const fmt = formatFromName(name) ?? 'psd';
   if (fmt === 'psd') return encodePsd(doc);
-  if (doc.layers.length > 1) toast(`Формат ${fmt.toUpperCase()} не хранит слои — сохранено сведённое изображение`);
-  return encodeCanvas(doc.composite(), fmt, 95);
+  return encodeCanvas(doc.composite(), fmt, quality);
 }
 
+/**
+ * ⌘S: документ с путём сохраняется в свой формат; новый (или «Сохранить как…») — через диалог
+ * выбора формата. Атлас и вкладки его спрайтов — проектом .pyard.
+ */
 export async function saveDoc(as = false) {
   const doc = activeDoc();
   if (!doc) return;
   commitPending();
-  // атлас и вкладки его спрайтов сохраняются проектом .pyard
   const atlas = ownerAtlas(doc);
   if (atlas && isAtlas(atlas)) return saveAtlasProject(atlas, as && atlas === doc);
+  if (as || !doc.path || !isTauri) return openDialog({ kind: 'save-as' });
   await withBusy('Сохранение…', async () => {
-    if (!as && doc.path && isTauri) {
-      await writePath(doc.path, await encodeForPath(doc, doc.path));
-      doc.savedRev = doc.rev;
-      toast(`Сохранено: ${baseName(doc.path)}`);
-      return changed();
-    }
-    const fmt = formatFromName(doc.name);
-    const defName = fmt === 'psd' ? doc.name : `${fileStem(doc.name)}.psd`;
-    // в Tauri формат определяется по расширению, выбранному в диалоге
-    const data = isTauri ? null : encodePsd(doc);
-    let path: string | null;
-    if (isTauri) {
-      const { save } = await import('@tauri-apps/plugin-dialog');
-      path = await save({ defaultPath: defName, filters: SAVE_FILTERS });
-      if (!path) return;
-      await writePath(path, await encodeForPath(doc, path));
-    } else path = await saveFileAs(defName, data!, SAVE_FILTERS);
+    const fmt = formatOfPath(doc.path!);
+    await writePath(doc.path!, await encodeDoc(doc, fmt, saveQuality.get(doc) ?? 92));
+    doc.savedRev = doc.rev;
+    toast(`Сохранено: ${baseName(doc.path!)}`);
+    changed();
+  });
+}
+
+/** Сохранить в выбранном формате (из диалога «Сохранить как»). */
+export async function saveDocAs(fmt: SaveFormat, quality: number) {
+  const doc = activeDoc();
+  if (!doc) return;
+  const f = SAVE_FORMATS.find((x) => x.id === fmt)!;
+  await withBusy('Сохранение…', async () => {
+    const data = await encodeDoc(doc, fmt, quality);
+    const path = await saveFileAs(`${fileStem(doc.name)}.${f.ext}`, data, [{ name: f.label, extensions: [f.ext, ...(fmt === 'jpg' ? ['jpeg'] : fmt === 'tiff' ? ['tiff'] : [])] }]);
     if (!path) return;
     doc.path = isTauri ? path : null;
     doc.name = baseName(path);
     doc.savedRev = doc.rev;
-    toast(`Сохранено: ${doc.name}`);
+    saveQuality.set(doc, quality);
+    if (fmt !== 'psd' && doc.layers.length > 1) toast(`Сохранено: ${doc.name}. Формат ${f.label} не хранит слои — в файле сведённое изображение`);
+    else toast(`Сохранено: ${doc.name}`);
     changed();
   });
 }

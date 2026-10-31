@@ -18,6 +18,7 @@ import { PdfExportDialog, PdfImportDialog } from './PdfDialogs';
 import { PrintDialog } from './PrintDialog';
 import { ColorDialog } from './ColorDialog';
 import { ScanDialog } from './ScanDialog';
+import { ExportAsDialog, SaveAsDialog } from './SaveDialogs';
 
 export function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: () => void; seeThrough?: boolean; width?: number }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
@@ -660,6 +661,8 @@ export function Dialogs() {
     case 'print': return <PrintDialog />;
     case 'color': return <ColorDialog key={d.target} target={d.target} />;
     case 'scan': return <ScanDialog />;
+    case 'save-as': return <SaveAsDialog />;
+    case 'export-as': return <ExportAsDialog />;
     case 'curves': return activeDoc()?.activeLayer ? <CurvesDialog /> : null;
     case 'fill': return activeDoc()?.activeLayer ? <FillDialog /> : null;
   }
