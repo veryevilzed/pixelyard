@@ -4,7 +4,7 @@ import { cropTool } from './crop';
 import { eyedropperTool, fillTool, gradientTool, handTool, shapeTool, textTool, zoomTool } from './fill';
 import { moveTool } from './move';
 import { transformActive, transformTool } from './transform';
-import { brushTool, eraserTool, pencilTool } from './paint';
+import { brushTool, eraserTool, pencilTool, stampTool } from './paint';
 import { lassoTool, marqueeEllipseTool, marqueeRectTool, polygonLassoTool, wandTool } from './select';
 import { sliceTool } from './slice';
 import { knifeTool } from './knife';
@@ -26,6 +26,7 @@ export const TOOLS: Record<ToolId, Tool> = {
   brush: brushTool,
   pencil: pencilTool,
   eraser: eraserTool,
+  stamp: stampTool,
   fill: fillTool,
   gradient: gradientTool,
   shape: shapeTool,

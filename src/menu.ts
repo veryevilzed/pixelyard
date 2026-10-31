@@ -440,6 +440,7 @@ export const TOOL_KEYS: Record<string, ToolId | ToolId[]> = {
   b: 'brush',
   n: 'pencil',
   e: 'eraser',
+  s: 'stamp',
   g: ['fill', 'gradient'],
   u: 'shape',
   t: 'text',
@@ -519,6 +520,7 @@ export function adjustSize(dir: 1 | -1) {
   const step = (v: number) => Math.max(1, Math.min(1000, v < 10 ? v + dir : Math.round(v * (dir > 0 ? 1.15 : 1 / 1.15))));
   if (tool === 'brush') setOpts({ brushSize: step(opts.brushSize) });
   else if (tool === 'pencil') setOpts({ pencilSize: Math.max(1, opts.pencilSize + dir) });
+  else if (tool === 'stamp') setOpts({ stampSize: step(opts.stampSize) });
   else if (tool === 'eraser') setOpts({ eraserSize: opts.eraserMode === 'pencil' ? Math.max(1, opts.eraserSize + dir) : step(opts.eraserSize) });
   changed();
 }

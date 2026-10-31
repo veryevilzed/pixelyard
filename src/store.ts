@@ -17,6 +17,7 @@ export type ToolId =
   | 'brush'
   | 'pencil'
   | 'eraser'
+  | 'stamp'
   | 'fill'
   | 'gradient'
   | 'shape'
@@ -38,6 +39,12 @@ export interface ToolOptions {
   eraserMode: 'brush' | 'pencil';
   eraserHardness: number;
   eraserOpacity: number;
+  stampSize: number;
+  stampHardness: number;
+  stampOpacity: number;
+  /** Смещение источника сохраняется между мазками. */
+  stampAligned: boolean;
+  stampSample: 'layer' | 'all';
   fillTolerance: number;
   fillContiguous: boolean;
   fillSampleMerged: boolean;
@@ -90,6 +97,11 @@ export const DEFAULT_OPTIONS: ToolOptions = {
   eraserMode: 'brush',
   eraserHardness: 80,
   eraserOpacity: 100,
+  stampSize: 40,
+  stampHardness: 60,
+  stampOpacity: 100,
+  stampAligned: true,
+  stampSample: 'layer',
   fillTolerance: 32,
   fillContiguous: true,
   fillSampleMerged: false,

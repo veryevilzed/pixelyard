@@ -2,11 +2,11 @@ import { createCanvas, ctx2d, rgbaToCss, unionRect } from '../core/canvas';
 import type { Doc } from '../core/doc';
 import { maskedCopy } from '../core/selection';
 import type { Point, Rect, RGBA } from '../core/types';
-import { app, setFg } from '../store';
+import { app, setFg, toast } from '../store';
 import { changed, editableLayer, requestRender, type PointerInfo, type Tool } from './base';
 import { sampleColor } from './sample';
 
-type Kind = 'brush' | 'pencil' | 'eraser';
+type Kind = 'brush' | 'pencil' | 'eraser' | 'stamp';
 
 interface Stroke {
   doc: Doc;
@@ -23,7 +23,16 @@ interface Stroke {
   carry: number;
   /** Пиксели карандаша (для pixel-perfect). */
   pixels: Point[] | null;
+  /** Штамп: снимок источника и смещение (точка мазка − точка источника). */
+  clone: { src: HTMLCanvasElement; dx: number; dy: number } | null;
 }
+
+/**
+ * Источник штампа: Alt+клик запоминает слой и точку. При «выравнивании» смещение
+ * фиксируется первым мазком и сохраняется для следующих (как в Photoshop).
+ */
+let cloneSource: { docId: string; layerId: string; x: number; y: number; offset: Point | null } | null = null;
+export const stampSource = () => cloneSource;
 
 let stroke: Stroke | null = null;
 let hoverPt: Point | null = null;
@@ -59,6 +68,7 @@ function softStamp(size: number, hardness: number, color: RGBA): HTMLCanvasEleme
 function settings(kind: Kind) {
   const o = app().opts;
   if (kind === 'brush') return { size: o.brushSize, hardness: o.brushHardness, opacity: o.brushOpacity / 100, aliased: !o.brushAntialias, round: true };
+  if (kind === 'stamp') return { size: o.stampSize, hardness: o.stampHardness, opacity: o.stampOpacity / 100, aliased: false, round: true };
   if (kind === 'pencil') return { size: o.pencilSize, hardness: 100, opacity: o.brushOpacity / 100, aliased: true, round: o.pencilShape === 'round' };
   return {
     size: o.eraserSize,
@@ -185,6 +195,22 @@ function extend(kind: Kind, s: Stroke, to: Point, pressure: number) {
   s.last = to;
 }
 
+/** Что кладётся на слой: для кисти — сам буфер, для штампа — источник по маске мазка. */
+let cloneScratch: HTMLCanvasElement | null = null;
+function strokeLayer(s: Stroke): HTMLCanvasElement {
+  const mask = s.doc.selection ? maskedCopy(s.buffer, s.doc.selection) : s.buffer;
+  if (!s.clone) return mask;
+  if (!cloneScratch || cloneScratch.width !== s.buffer.width || cloneScratch.height !== s.buffer.height) cloneScratch = createCanvas(s.buffer.width, s.buffer.height);
+  const t = ctx2d(cloneScratch);
+  t.globalCompositeOperation = 'source-over';
+  t.clearRect(0, 0, cloneScratch.width, cloneScratch.height);
+  t.drawImage(s.clone.src, s.clone.dx, s.clone.dy);
+  t.globalCompositeOperation = 'destination-in';
+  t.drawImage(mask, 0, 0);
+  t.globalCompositeOperation = 'source-over';
+  return cloneScratch;
+}
+
 function installPreview(s: Stroke) {
   s.doc.preview = {
     layerId: s.layerId,
@@ -192,7 +218,7 @@ function installPreview(s: Stroke) {
       ctx.drawImage(layer.canvas, 0, 0);
       ctx.globalAlpha = s.opacity;
       ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
-      ctx.drawImage(s.doc.selection ? maskedCopy(s.buffer, s.doc.selection) : s.buffer, 0, 0);
+      ctx.drawImage(strokeLayer(s), 0, 0);
     },
   };
 }
@@ -204,8 +230,8 @@ function commit() {
   s.doc.preview = null;
   lastEnd.set(s.doc.id, s.last);
   if (!s.bbox) return changed();
-  const buf = s.doc.selection ? maskedCopy(s.buffer, s.doc.selection) : s.buffer;
-  const labels: Record<string, string> = { brush: 'Кисть', pencil: 'Карандаш', eraser: 'Ластик' };
+  const buf = strokeLayer(s);
+  const labels: Record<string, string> = { brush: 'Кисть', pencil: 'Карандаш', eraser: 'Ластик', stamp: 'Штамп' };
   s.doc.pixelEdit(s.layerId, s.bbox, labels[currentKind], (ctx) => {
     ctx.globalAlpha = s.opacity;
     ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
@@ -220,10 +246,31 @@ function makePaintTool(kind: Kind): Tool {
   return {
     cursor: () => 'none',
     down(p, doc) {
+      if (kind === 'stamp' && p.alt) {
+        // Alt+клик — источник: активный слой и точка
+        if (!doc.activeLayerId) return;
+        cloneSource = { docId: doc.id, layerId: doc.activeLayerId, x: p.x, y: p.y, offset: null };
+        toast(`Источник штампа: «${doc.activeLayer?.name}», ${Math.round(p.x)}, ${Math.round(p.y)}`);
+        return requestRender();
+      }
       if (p.alt && kind !== 'eraser') {
         const c = sampleColor(doc, p.x, p.y, app().opts.eyedropperMerged);
         if (c) setFg(c);
         return;
+      }
+      let clone: Stroke['clone'] = null;
+      if (kind === 'stamp') {
+        const src = cloneSource;
+        if (!src || src.docId !== doc.id) return void toast('Сначала задайте источник: ⌥+клик по нужному месту (на нужном слое)', 'error');
+        const srcLayer = doc.getLayer(src.layerId);
+        if (!srcLayer && app().opts.stampSample === 'layer') return void toast('Слой-источник удалён — задайте источник заново (⌥+клик)', 'error');
+        const o = app().opts;
+        const offset = o.stampAligned && src.offset ? src.offset : { x: p.x - src.x, y: p.y - src.y };
+        if (o.stampAligned) src.offset = offset;
+        // снимок: правки этого мазка не попадают в источник (можно клонировать в тот же слой)
+        const snap = createCanvas(doc.width, doc.height);
+        ctx2d(snap).drawImage(o.stampSample === 'all' ? doc.composite() : srcLayer!.canvas, 0, 0);
+        clone = { src: snap, dx: Math.round(offset.x), dy: Math.round(offset.y) };
       }
       const layer = editableLayer(doc);
       if (!layer) return;
@@ -239,11 +286,12 @@ function makePaintTool(kind: Kind): Tool {
         aliased: st.aliased,
         round: st.round,
         opacity: st.opacity,
-        color: kind === 'eraser' ? [0, 0, 0, 255] : app().fg,
+        color: kind === 'eraser' || kind === 'stamp' ? [0, 0, 0, 255] : app().fg,
         bbox: null,
         last: start,
         carry: -1,
         pixels: pencilPerfect ? [] : null,
+        clone,
       };
       if (st.aliased) stroke.carry = 0;
       installPreview(stroke);
@@ -267,7 +315,25 @@ function makePaintTool(kind: Kind): Tool {
       commit();
       hoverPt = null;
     },
-    overlay(ctx, v) {
+    overlay(ctx, v, doc) {
+      if (kind === 'stamp' && cloneSource && cloneSource.docId === doc.id) {
+        // где сейчас берётся источник: при мазке — по смещению мазка, до него — сама точка источника
+        const off = stroke?.clone ? { x: stroke.clone.dx, y: stroke.clone.dy } : app().opts.stampAligned && cloneSource.offset ? cloneSource.offset : null;
+        const sp = off && hoverPt ? { x: hoverPt.x - off.x, y: hoverPt.y - off.y } : { x: cloneSource.x, y: cloneSource.y };
+        const cx = v.panX + sp.x * v.zoom, cy = v.panY + sp.y * v.zoom;
+        ctx.save();
+        for (const [col, w] of [['rgba(0,0,0,0.8)', 3], ['#fff', 1]] as const) {
+          ctx.strokeStyle = col;
+          ctx.lineWidth = w;
+          ctx.beginPath();
+          ctx.moveTo(cx - 9, cy);
+          ctx.lineTo(cx + 9, cy);
+          ctx.moveTo(cx, cy - 9);
+          ctx.lineTo(cx, cy + 9);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       if (!hoverPt) return;
       const st = settings(kind);
       ctx.save();
@@ -307,6 +373,7 @@ function makePaintTool(kind: Kind): Tool {
 export const brushTool = makePaintTool('brush');
 export const pencilTool = makePaintTool('pencil');
 export const eraserTool = makePaintTool('eraser');
+export const stampTool = makePaintTool('stamp');
 
 export function clearPaintHover() {
   hoverPt = null;

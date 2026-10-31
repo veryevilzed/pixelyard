@@ -1,6 +1,6 @@
 import {
   Blend, Brush, CircleDashed, Crop, Eraser, Hand, Lasso, LassoSelect, Move, PaintBucket, Pencil, Pipette, Shapes, Slice,
-  SquareDashed, Type, WandSparkles, ZoomIn, ArrowLeftRight, Scissors,
+  SquareDashed, Type, WandSparkles, ZoomIn, ArrowLeftRight, Scissors, Stamp,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { resetColors, setTool, swapColors } from '../actions';
@@ -34,6 +34,7 @@ const GROUPS: ToolDef[][] = [
     { id: 'brush', icon: Brush, label: 'Кисть', key: 'B' },
     { id: 'pencil', icon: Pencil, label: 'Карандаш (попиксельно)', key: 'N' },
     { id: 'eraser', icon: Eraser, label: 'Ластик', key: 'E' },
+    { id: 'stamp', icon: Stamp, label: 'Штамп (⌥+клик — источник)', key: 'S' },
     { id: 'fill', icon: PaintBucket, label: 'Заливка', key: 'G' },
     { id: 'gradient', icon: Blend, label: 'Градиент', key: 'G' },
   ],

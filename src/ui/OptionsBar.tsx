@@ -2,6 +2,7 @@ import { Circle, Minus, Square } from 'lucide-react';
 import * as A from '../actions';
 import { activeDoc, openDialog, setFg, setOpts, setPrefs, useApp, type ToolOptions } from '../store';
 import { applyTextOptsToLayer } from '../tools/fill';
+import { stampSource } from '../tools/paint';
 import { Check, ColorField, NumberField, Seg, SliderField } from './controls';
 import { TOOL_LABELS } from './Toolbox';
 import { PatternButton } from './PatternPicker';
@@ -365,6 +366,26 @@ export function OptionsBar() {
         </>
       );
       break;
+    case 'stamp': {
+      const src = stampSource();
+      body = (
+        <>
+          <SliderField label="Размер" value={o.stampSize} min={1} max={500} onChange={(v) => setOpts({ stampSize: v })} suffix="px" />
+          <SliderField label="Жёсткость" value={o.stampHardness} min={0} max={100} onChange={(v) => setOpts({ stampHardness: v })} suffix="%" />
+          <SliderField label="Непрозр." value={o.stampOpacity} min={1} max={100} onChange={(v) => setOpts({ stampOpacity: v })} suffix="%" />
+          <Check label="Выравнивание" checked={o.stampAligned} onChange={(v) => setOpts({ stampAligned: v })} title="Вкл. — смещение источника сохраняется между мазками; выкл. — каждый мазок начинается с точки источника" />
+          <span className="field">
+            <span className="label static">Брать из</span>
+            <select value={o.stampSample} onChange={(e) => setOpts({ stampSample: e.target.value as 'layer' | 'all' })}>
+              <option value="layer">слоя источника</option>
+              <option value="all">всех слоёв</option>
+            </select>
+          </span>
+          <span className="note">{src ? `Источник: ${Math.round(src.x)}, ${Math.round(src.y)} — ⌥+клик задать заново` : '⌥+клик — задать источник (на нужном слое), затем рисуйте на целевом слое'}</span>
+        </>
+      );
+      break;
+    }
     case 'hand':
       body = <span className="note">Перетаскивайте холст. Пробел — временная рука в любом инструменте, колёсико/трекпад — прокрутка, ⌘/pinch — масштаб</span>;
       break;
