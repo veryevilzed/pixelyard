@@ -3,7 +3,7 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
 Раздел текущей версии `npm run release` берёт в описание релиза на GitHub.
 
-## [Не выпущено]
+## [0.2.1] — 2026-10-31
 
 ### Новое
 - «Сохранить как…» и «Экспорт в PDF» показывают размер итогового файла (вживую при смене формата и качества)
@@ -71,6 +71,7 @@
 ### Сборка
 - Подписанные и нотаризованные сборки: `npm run release` (организации Apple, выпуск Developer ID)
 
+[0.2.1]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.2.1
 [0.2.0]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.2.0
 [0.1.2]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.1.2
 [0.1.1]: https://github.com/veryevilzed/pixelyard/releases/tag/v0.1.1
