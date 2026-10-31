@@ -11,10 +11,10 @@ use std::sync::{mpsc, Mutex};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{define_class, msg_send, AllocAnyThread};
+use objc2::{define_class, msg_send, AllocAnyThread, Message};
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSString, NSURL};
 use objc2_image_capture_core::{
-    ICDevice, ICDeviceBrowser, ICDeviceDelegate, ICDeviceLocationTypeMask, ICDeviceTypeMask, ICScannerBitDepth, ICScannerDevice,
+    ICDevice, ICDeviceBrowser, ICDeviceBrowserDelegate, ICDeviceDelegate, ICDeviceLocationTypeMask, ICDeviceTypeMask, ICScannerBitDepth, ICScannerDevice,
     ICScannerDeviceDelegate, ICScannerFunctionalUnit, ICScannerFunctionalUnitType, ICScannerMeasurementUnit, ICScannerPixelDataType,
     ICScannerTransferMode,
 };
@@ -78,6 +78,12 @@ struct Objs {
 
 thread_local! {
     static OBJS: RefCell<Option<Objs>> = const { RefCell::new(None) };
+    /// Найденные сканеры — собирает делегат поиска (без делегата ImageCaptureCore список не заполняет).
+    static FOUND: RefCell<Vec<Retained<ICDevice>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn device_id(d: &ICDevice) -> String {
+    unsafe { d.persistentIDString().map(|s| s.to_string()).or_else(|| d.UUIDString().map(|s| s.to_string())).unwrap_or_else(|| d.name().map(|s| s.to_string()).unwrap_or_default()) }
 }
 
 fn err_text(e: &NSError) -> String {
@@ -91,6 +97,28 @@ define_class!(
     struct ScanDelegate;
 
     unsafe impl NSObjectProtocol for ScanDelegate {}
+
+    unsafe impl ICDeviceBrowserDelegate for ScanDelegate {
+        #[unsafe(method(deviceBrowser:didAddDevice:moreComing:))]
+        fn browser_did_add(&self, _browser: &ICDeviceBrowser, device: &ICDevice, _more: bool) {
+            if unsafe { device.r#type() }.0 & ICDeviceTypeMask::Scanner.0 == 0 {
+                return;
+            }
+            let id = device_id(device);
+            FOUND.with(|f| {
+                let mut f = f.borrow_mut();
+                if !f.iter().any(|d| device_id(d) == id) {
+                    f.push(device.retain());
+                }
+            });
+        }
+
+        #[unsafe(method(deviceBrowser:didRemoveDevice:moreGoing:))]
+        fn browser_did_remove(&self, _browser: &ICDeviceBrowser, device: &ICDevice, _more: bool) {
+            let id = device_id(device);
+            FOUND.with(|f| f.borrow_mut().retain(|d| device_id(d) != id));
+        }
+    }
 
     unsafe impl ICDeviceDelegate for ScanDelegate {
         #[unsafe(method(device:didCloseSessionWithError:))]
@@ -224,20 +252,14 @@ fn start_scan(scanner: &ICScannerDevice, req: &ScanRequest) {
 
 /// Обновить снимок состояния из объектов (главный поток).
 fn refresh(o: &Objs) {
-    let devices: Vec<DeviceInfo> = unsafe { o.browser.devices() }
-        .map(|list| {
-            list.iter()
-                .filter(|d| unsafe { d.r#type() }.0 & ICDeviceTypeMask::Scanner.0 != 0)
-                .map(|d| unsafe {
-                    DeviceInfo {
-                        id: d.persistentIDString().map(|s| s.to_string()).or_else(|| d.UUIDString().map(|s| s.to_string())).unwrap_or_default(),
-                        name: d.name().map(|s| s.to_string()).unwrap_or_else(|| "Сканер".into()),
-                        remote: d.isRemote(),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let devices: Vec<DeviceInfo> = FOUND.with(|f| {
+        f.borrow()
+            .iter()
+            .map(|d| unsafe {
+                DeviceInfo { id: device_id(d), name: d.name().map(|s| s.to_string()).unwrap_or_else(|| "Сканер".into()), remote: d.isRemote() }
+            })
+            .collect()
+    });
     let mut caps = None;
     if let Some(sc) = &o.scanner {
         unsafe {
@@ -285,10 +307,13 @@ pub async fn scanner_start<R: Runtime>(app: AppHandle<R>) -> Result<(), String> 
                 return;
             }
             unsafe {
+                let delegate = ScanDelegate::new();
                 let browser = ICDeviceBrowser::new();
+                // делегат — до start(): иначе найденные устройства не приходят
+                browser.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
                 browser.setBrowsedDeviceTypeMask(ICDeviceTypeMask(ICDeviceTypeMask::Scanner.0 | ICDeviceLocationTypeMask::Local.0 | ICDeviceLocationTypeMask::Remote.0));
                 browser.start();
-                *slot = Some(Objs { browser, delegate: ScanDelegate::new(), scanner: None, pending: None });
+                *slot = Some(Objs { browser, delegate, scanner: None, pending: None });
             }
         });
         with_state(|s| s.error = None);
@@ -325,11 +350,7 @@ pub async fn scanner_open<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(
                         old.requestCloseSession();
                     }
                 }
-                let found = o.browser.devices().and_then(|list| {
-                    list.iter().find(|d| {
-                        d.persistentIDString().map(|s| s.to_string()).or_else(|| d.UUIDString().map(|s| s.to_string())).as_deref() == Some(id.as_str())
-                    })
-                });
+                let found = FOUND.with(|f| f.borrow().iter().find(|d| device_id(d) == id).cloned());
                 let Some(dev) = found else { return Err("Сканер не найден — возможно, он выключен".to_string()) };
                 let Ok(scanner) = dev.downcast::<ICScannerDevice>() else { return Err("Это устройство не сканер".to_string()) };
                 scanner.setDelegate(Some(ProtocolObject::from_ref(&*o.delegate)));
@@ -401,6 +422,7 @@ pub async fn scanner_close<R: Runtime>(app: AppHandle<R>) -> Result<(), String> 
                 }
             }
         });
+        FOUND.with(|f| f.borrow_mut().clear());
         *STATE.lock().unwrap() = None;
     })
 }
